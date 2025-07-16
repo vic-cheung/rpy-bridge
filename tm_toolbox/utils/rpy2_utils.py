@@ -114,7 +114,9 @@ class RFunctionCaller:
 
     def call(self, function_name: str, *args: object, **kwargs: object) -> object:
         """
-        Call an R function from the sourced script, and recursively convert & post-process the result.
+        Call an R function from the sourced script, and recursively convert &
+        post-process the result.
+
         Handles:
         - Direct data.frame
         - NamedList or ListVector
@@ -180,11 +182,7 @@ def r_namedlist_to_dict(namedlist: object) -> object:
         # Only iterate if names is not NULL
         if not isinstance(names, NULLType):
             for key, value in zip(names, namedlist):
-                key_str = (
-                    str(key)
-                    if key is not None and not isinstance(key, NULLType)
-                    else None
-                )
+                key_str = str(key) if key is not None and not isinstance(key, NULLType) else None
                 if key_str:
                     result[key_str] = r_namedlist_to_dict(value)
             return result
@@ -221,7 +219,8 @@ def r_namedlist_to_dict(namedlist: object) -> object:
 # %%
 def clean_r_dataframe(r_df: object) -> object:
     """
-    Clean an R data.frame object by removing common non-structural attributes like .groups and .rows.
+    Clean an R data.frame object by removing common non-structural attributes
+    like .groups and .rows.
     """
     for attr in [".groups", ".rows"]:
         try:
@@ -303,9 +302,7 @@ def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
             if not values.empty and values.between(10000, 40000).all():
                 try:
                     # "1970-01-01" is the reference date for Unix Epoch
-                    df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(
-                        series, unit="D"
-                    )
+                    df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(series, unit="D")
                 except Exception:
                     pass
 
@@ -340,9 +337,7 @@ def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # -------------------------------------------
 
 
-def normalize_dtypes(
-    df1: pd.DataFrame, df2: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def normalize_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Aligns column dtypes across two DataFrames for accurate comparison.
     - Replaces empty strings with pd.NA.
@@ -358,12 +353,8 @@ def normalize_dtypes(
         dtype1, dtype2 = s1.dtype, s2.dtype
 
         # If one is numeric and the other is object, try coercing both to numeric
-        if (
-            pd.api.types.is_numeric_dtype(dtype1)
-            and pd.api.types.is_object_dtype(dtype2)
-        ) or (
-            pd.api.types.is_object_dtype(dtype1)
-            and pd.api.types.is_numeric_dtype(dtype2)
+        if (pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_object_dtype(dtype2)) or (
+            pd.api.types.is_object_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2)
         ):
             try:
                 df1[col] = pd.to_numeric(s1, errors="coerce")
@@ -373,9 +364,7 @@ def normalize_dtypes(
                 pass  # fallback to next block if coercion fails
 
         # If both are numeric but of different types (e.g., int vs float), unify to float64
-        if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(
-            dtype2
-        ):
+        if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2):
             df1[col] = df1[col].astype("float64")
             df2[col] = df2[col].astype("float64")
             continue
@@ -389,9 +378,7 @@ def normalize_dtypes(
 
 
 # %%
-def align_numeric_dtypes(
-    df1: pd.DataFrame, df2: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def align_numeric_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Ensure aligned numeric dtypes between two DataFrames for accurate comparison.
     Converts between int, float, and numeric-looking strings where appropriate.
@@ -425,9 +412,7 @@ def align_numeric_dtypes(
 
 
 # %%
-def compare_r_py_dataframes(
-    df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8
-) -> dict:
+def compare_r_py_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8) -> dict:
     """
     Compare a Python DataFrame (df1) with an R DataFrame converted to pandas (df2).
 
@@ -478,9 +463,7 @@ def compare_r_py_dataframes(
         col_py = df1_aligned[col]
         col_r = df2_aligned[col]
 
-        if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(
-            col_r
-        ):
+        if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(col_r):
             col_py, col_r = col_py.align(col_r)
 
             close = np.isclose(
