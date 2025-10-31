@@ -39,15 +39,33 @@ def activate_renv(path_to_renv: Path) -> None:
     """
     Activates the renv environment using renv::load() to ensure the correct project is loaded.
     This avoids sourcing activate.R directly and avoids accidentally initializing a new environment.
+
+    Accepts either:
+    - Direct path to renv directory (e.g., /path/to/renv)
+    - Parent directory containing renv/ folder (e.g., /path/to/repos where renv/ is inside)
     """
 
-    renv_project_dir = path_to_renv.resolve()
-    renv_activate = renv_project_dir / "renv" / "activate.R"
+    path_to_renv = path_to_renv.resolve()
+
+    # Determine if path_to_renv is the renv directory itself or its parent
+    if path_to_renv.name == "renv" and (path_to_renv / "activate.R").exists():
+        # Path points directly to renv directory
+        renv_dir = path_to_renv
+        renv_project_dir = path_to_renv.parent
+    else:
+        # Path points to parent directory containing renv/
+        renv_dir = path_to_renv / "renv"
+        renv_project_dir = path_to_renv
+
+    renv_activate = renv_dir / "activate.R"
     renv_lock = renv_project_dir / "renv.lock"
 
     if not renv_activate.exists() or not renv_lock.exists():
         raise FileNotFoundError(
-            f"[Error] renv environment not found or incomplete at: {renv_project_dir}"
+            f"[Error] renv environment not found or incomplete.\n"
+            f"  Expected activate.R at: {renv_activate}\n"
+            f"  Expected renv.lock at: {renv_lock}\n"
+            f"  Provided path: {path_to_renv}"
         )
 
     # Optional: set R_ENVIRON_USER if .Renviron exists
