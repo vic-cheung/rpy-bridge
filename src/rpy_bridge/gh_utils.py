@@ -18,6 +18,13 @@ import getpass
 import sys
 import tempfile
 import time
+import ssl
+
+# Prefer certifi's CA bundle to avoid macOS/custom-Python SSL verification issues
+try:
+    import certifi  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    certifi = None
 
 
 def get_github_token() -> Optional[str]:
@@ -117,7 +124,13 @@ def fetch_r_script_from_github(
     for attempt in range(1, attempts + 1):
         req = urllib.request.Request(api_url, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            # Build SSL context using certifi when available to avoid "unable to get local issuer" errors
+            if certifi is not None:
+                context = ssl.create_default_context(cafile=certifi.where())
+            else:
+                context = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, timeout=10, context=context) as resp:
                 data = json.load(resp)
             break
         except urllib.error.HTTPError as e:

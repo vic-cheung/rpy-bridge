@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.0",
     "rpy2>=3.5",
     "loguru>=0.7",
+    "certifi>=2025.11.12",
 ]
 classifiers = [
     "License :: OSI Approved :: MIT License",
