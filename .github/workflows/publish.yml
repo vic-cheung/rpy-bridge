@@ -25,7 +25,7 @@ jobs:
         run: |
           # Install the package so tests can import runtime dependencies (numpy, pandas, rpy2, ...)
           # Install system dependencies for rpy2 and R
-          sudo apt-get update && sudo apt-get install -y r-base r-base-dev libssl-dev libxml2-dev libcurl4-openssl-dev build-essential
+          sudo apt-get update && sudo apt-get install -y r-base r-base-dev libssl-dev libxml2-dev libcurl4-openssl-dev build-essential libtirpc-dev libpcre2-dev liblzma-dev zlib1g-dev libbz2-dev libicu-dev
           # Then install the package in editable mode
           python -m pip install -e .
 
