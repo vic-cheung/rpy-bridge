@@ -3,7 +3,7 @@ Wrapper for calling R functions from Python using rpy2.
 
 ----------
 ** R must be installed and accessible in your environment **
-Ensure compatibility with your R project's renv setup.
+Ensure compatibility with your R project's renv setup (or other virtual env/base env if that's what you're using).
 ----------
 """
 
@@ -33,7 +33,15 @@ from rpy2.robjects.vectors import (
     StrVector,
 )
 from typing import Optional
-from rpy_bridge.gh_utils import fetch_r_script_from_github
+from rpy_bridge.gh_utils import fetch_r_script_from_github, get_github_token
+
+try:
+    from loguru import logger  # type: ignore
+except Exception:
+    import logging
+
+    logging.basicConfig()
+    logger = logging.getLogger("rpy-bridge")
 
 
 # %%
@@ -74,7 +82,7 @@ def activate_renv(path_to_renv: Path) -> None:
     renviron_file = renv_project_dir / ".Renviron"
     if renviron_file.is_file():
         os.environ["R_ENVIRON_USER"] = str(renviron_file)
-        print("[Info] R_ENVIRON_USER set to:", renviron_file)
+        logger.info("R_ENVIRON_USER set to: {}", renviron_file)
 
     # Load the renv package
     try:
@@ -87,14 +95,13 @@ def activate_renv(path_to_renv: Path) -> None:
 
     # Load the renv environment using renv::load(path)
     try:
-        print("Using R at:", robjects.r("R.home()")[0])
+        logger.info("Using R at: {}", robjects.r("R.home()")[0])
         robjects.r(f'renv::load("{renv_project_dir.as_posix()}")')
-        print(f"[Info] renv environment loaded for project: {renv_project_dir}")
+        logger.info("renv environment loaded for project: {}", renv_project_dir)
     except Exception as e:
         raise RuntimeError(f"[Error] Failed to load renv environment: {e}")
 
-    print(".libPaths()")
-    print(robjects.r(".libPaths()"))
+    logger.debug(".libPaths(): {}", robjects.r(".libPaths()"))
 
 
 # %%
@@ -125,12 +132,12 @@ class RFunctionCaller:
         if self.path_to_renv:
             activate_renv(self.path_to_renv)
         else:
-            print("[Info] No renv path provided; using base or current environment.")
+            logger.info("No renv path provided; using base or current environment.")
 
         # Set the working directory to the script's directory
         robjects.r(f'setwd("{self.script_dir.as_posix()}")')
         robjects.r(f'source("{self.script_path.as_posix()}")')
-        print(f"[Info] R script sourced: {self.script_path.name}")
+        logger.info("R script sourced: {}", self.script_path.name)
 
     @classmethod
     def from_github(
@@ -142,6 +149,7 @@ class RFunctionCaller:
         cache_dir: Optional[Path] = None,
         path_to_renv: Optional[Path] = None,
         trust_remote_code: bool = False,
+        require_token: bool = False,
     ) -> "RFunctionCaller | Path":
         """
         Download an R script from a GitHub repository and construct an RFunctionCaller.
@@ -166,9 +174,37 @@ class RFunctionCaller:
         if cache_dir is None:
             cache_dir = Path.home() / ".cache" / "rpy-bridge"
 
-        local_path, sha = fetch_r_script_from_github(
-            repo=repo, path=file_path, ref=ref, token=token, cache_dir=cache_dir
-        )
+        # If a token wasn't provided, allow gh_utils to discover or prompt if requested
+        if token is None and require_token:
+            # allow interactive prompting when require_token=True by default
+            token = get_github_token()
+            if not token:
+                logger.debug(
+                    "No token discovered; will prompt interactively for token because require_token=True"
+                )
+
+        else:
+            # If token is None and not required, discovery will be attempted by fetch
+            token = token
+
+        try:
+            local_path, sha = fetch_r_script_from_github(
+                repo=repo,
+                path=file_path,
+                ref=ref,
+                token=token,
+                cache_dir=cache_dir,
+                require_token=require_token,
+                prompt=True,
+            )
+        except RuntimeError as e:
+            msg = str(e)
+            if "401" in msg or "403" in msg or "Permission" in msg or "denied" in msg.lower():
+                raise RuntimeError(
+                    "Failed to fetch from GitHub: repository may be private or require authentication. "
+                    "Provide a personal access token via `token=` or set `GITHUB_TOKEN`/`GH_TOKEN` in the environment."
+                ) from e
+            raise
 
         if not trust_remote_code:
             return local_path
@@ -187,6 +223,7 @@ def call_r_function_from_github(
     cache_dir: Optional[Path] = None,
     path_to_renv: Optional[Path] = None,
     trust_remote_code: bool = True,
+    require_token: bool = False,
     **kwargs,
 ) -> object:
     """
@@ -203,6 +240,7 @@ def call_r_function_from_github(
         cache_dir=cache_dir,
         path_to_renv=path_to_renv,
         trust_remote_code=trust_remote_code,
+        require_token=require_token,
     )
 
     if not trust_remote_code:

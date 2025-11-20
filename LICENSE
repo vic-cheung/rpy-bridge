@@ -20,6 +20,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Acknowledgement: This project builds on work originally developed at
-Revolution Medicines and interfaces with the rpy2 project, which is licensed
+Acknowledgement: This project builds on work originally developed at a
+previous employer and interfaces with the rpy2 project, which is licensed
 under the GNU General Public License version 2 or later.

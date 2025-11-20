@@ -14,6 +14,8 @@ import urllib.error
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
+import getpass
+import sys
 import tempfile
 import time
 
@@ -53,14 +55,45 @@ def get_github_token() -> Optional[str]:
     return None
 
 
+def ensure_github_token(require: bool = False, prompt: bool = True) -> Optional[str]:
+    """
+    Ensure a GitHub token is available.
+
+    If a token is discoverable via env or git credential helper it is returned.
+    If `require` is True and no token is found, optionally prompt the user
+    (when `prompt=True` and stdin is a TTY) for a token using a secure prompt.
+
+    Returns the token string or None.
+    """
+    tok = get_github_token()
+    if tok:
+        return tok
+
+    if require:
+        if prompt and sys.stdin and sys.stdin.isatty():
+            try:
+                entered = getpass.getpass("GitHub token required. Paste token (input hidden): ")
+                if entered:
+                    return entered.strip()
+            except Exception:
+                pass
+        # Not interactive or nothing entered -> return None so caller can raise
+        return None
+
+    return None
+
+
 def fetch_r_script_from_github(
     repo: str,
     path: str,
     ref: str = "main",
     token: Optional[str] = None,
     cache_dir: Optional[Path] = None,
+    require_token: bool = False,
+    prompt: bool = True,
 ) -> Tuple[Path, str]:
-    """Fetch a file from the GitHub Contents API, cache it by commit SHA.
+    """
+    Fetch a file from the GitHub Contents API, cache it by commit SHA.
 
     Returns a tuple of (local_path, sha). Raises RuntimeError on failure.
     """
@@ -70,7 +103,10 @@ def fetch_r_script_from_github(
 
     api_url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={ref}"
     headers = {"Accept": "application/vnd.github.v3+json"}
+    # Resolve token: prefer explicit `token`, then discovery, then optional interactive prompt
     tok = token or get_github_token()
+    if not tok and require_token:
+        tok = ensure_github_token(require=True, prompt=prompt)
     if tok:
         headers["Authorization"] = f"token {tok}"
 
