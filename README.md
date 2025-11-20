@@ -4,6 +4,12 @@ Utilities for calling R code from Python using `rpy2`, including helpers to
 activate `renv` projects, invoke R functions, and post-process results into
 well-typed pandas DataFrames.
 
+This project was developed for bilingual teams where some functions are
+authored in R and the primary consumer is a Python-centric developer. It
+acts as a lightweight interoperability layer enabling a Python programmer to
+call and reuse R functions (written and maintained by R authors) without
+rewriting them in Python.
+
 ## Installation
 
 ```bash
@@ -56,49 +62,32 @@ Notes:
   the `renv/` directory itself. When provided, `rpy-bridge` will call
   `renv::load()` so the R session uses the project's library versions.
 
-Using a script fetched from GitHub (safe defaults)
+Remote fetch helpers were removed from this package to keep the API surface
+small and avoid environment-specific SSL and token handling issues. The
+intended workflow is:
+
+- Clone or download the R script into your local filesystem (review the
+  code if it came from a remote source).
+- Construct an `RFunctionCaller` with `script_path` pointing to the local
+  script and optionally `path_to_renv` to activate the project's R library.
+
+This keeps network, token, and SSL concerns outside the package while
+preserving an easy path for Python-first users to call R-written functions.
+
+If you need to run an R script from a remote repository, clone the repository
+locally (or download the script using your preferred tooling), review the
+script if necessary, and then construct an `RFunctionCaller` with the local
+`script_path`:
 
 ```python
-from rpy_bridge import call_r_function_from_github
+from rpy_bridge import RFunctionCaller
 
-# This only executes the remote code when `trust_remote_code=True`.
-# When False the call returns a cached Path to the downloaded script.
-path = call_r_function_from_github(
-    repo="some-owner/some-repo",
-    file_path="scripts/analysis.R",
-    function_name="analyse",
-    trust_remote_code=False,  # inspect file before running
-)
+project_dir = Path("/path/to/cloned/repo")
+script = project_dir / "scripts" / "analysis.R"
 
-print("Cached script at:", path)
+caller = RFunctionCaller(path_to_renv=None, script_path=script)
+result = caller.call("analyse", some_arg=42)
 ```
-
-To execute remote code explicitly (opt-in):
-
-```python
-from rpy_bridge import call_r_function_from_github
-
-# Only set trust_remote_code=True after you've reviewed the script.
-result = call_r_function_from_github(
-    repo="some-owner/some-repo",
-    file_path="scripts/analysis.R",
-    function_name="analyse",
-    trust_remote_code=True,
-    require_token=False,  # set True for private repos
-)
-```
-
-Security & token notes
-
-- `require_token=True` causes the fetch to fail fast if no token is available.
-- When `require_token=True` and a token is not found, `rpy-bridge` will prompt
-  interactively (TTY) to paste a token; set `prompt=False` to disable prompting.
-- Prefer providing `GITHUB_TOKEN` as an env var in CI for non-interactive runs.
-
-Caching
-
-- Downloaded scripts are cached under `~/.cache/rpy-bridge` and keyed by
-  repository and commit SHA so repeated fetches are fast and reproducible.
 
 
 
@@ -137,32 +126,9 @@ Python and R. Each project may require different R packages — check the
 package list in `examples/r-deps/setup_env.R` and commit a `renv.lock` for
 project-specific reproducibility.
 
-Token discovery and `require_token`
-
-`rpy-bridge` will attempt to discover a GitHub token automatically when you
-call `RFunctionCaller.from_github(...)` or `call_r_function_from_github(...)`:
-
-- It first checks `GITHUB_TOKEN` and `GH_TOKEN` environment variables.
-- If those are unset, it will query the git credential helper (same as
-  `git credential fill`).
-
-If you need to ensure authenticated access (for private repos), pass
-`require_token=True` to have the call fail fast with a clear error message
-when no token is available.
-
-Example (private repo)
-
-```python
-from rpy_bridge import call_r_function_from_github
-
-# This will raise immediately if no token is available (env var or git creds)
-result = call_r_function_from_github(
-  repo="your-org/private-repo",
-  file_path="scripts/private_script.R",
-  function_name="do_secret_thing",
-  require_token=True,
-)
-```
+Note: Remote fetch helpers were intentionally removed; token discovery and
+GitHub API interactions are no longer part of this package. Clone repositories
+locally or use your preferred tooling to obtain scripts before execution.
 
 ## Licensing
 

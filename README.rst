@@ -1,30 +1,13 @@
 rpy-bridge
 =========
 
-Usage example (safe fetch only):
+Usage example (local script):
 
 .. code-block:: python
 
     from rpy_bridge.rpy2_utils import RFunctionCaller
 
-    # Download the script but don't execute it yet
-    local_path = RFunctionCaller.from_github(
-        repo="owner/repo",
-        file_path="scripts/my_script.R",
-        trust_remote_code=False,
-    )
-
-    print("Downloaded to:", local_path)
-
-Execute and call a function (explicit opt-in):
-
-.. code-block:: python
-
-    from rpy_bridge.rpy2_utils import call_r_function_from_github
-
-    result = call_r_function_from_github(
-        repo="owner/repo",
-        file_path="scripts/my_script.R",
-        function_name="my_func",
-        trust_remote_code=True,
-    )
+    # Use a local script path (clone or download remote scripts yourself)
+    script_path = "/path/to/cloned/repo/scripts/my_script.R"
+    caller = RFunctionCaller(path_to_renv=None, script_path=script_path)
+    result = caller.call("my_func")

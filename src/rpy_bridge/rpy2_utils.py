@@ -33,7 +33,6 @@ from rpy2.robjects.vectors import (
     StrVector,
 )
 from typing import Optional
-from rpy_bridge.gh_utils import fetch_r_script_from_github, get_github_token
 
 try:
     from loguru import logger  # type: ignore
@@ -221,83 +220,9 @@ class RFunctionCaller:
             ready to call functions from the downloaded script. Otherwise returns
             the `Path` to the cached script so the caller can inspect it first.
         """
-        if cache_dir is None:
-            cache_dir = Path.home() / ".cache" / "rpy-bridge"
-
-        # If a token wasn't provided, allow gh_utils to discover or prompt if requested
-        if token is None and require_token:
-            # allow interactive prompting when require_token=True by default
-            token = get_github_token()
-            if not token:
-                logger.debug(
-                    "No token discovered; will prompt interactively for token because require_token=True"
-                )
-
-        else:
-            # If token is None and not required, discovery will be attempted by fetch
-            token = token
-
-        try:
-            local_path, sha = fetch_r_script_from_github(
-                repo=repo,
-                path=file_path,
-                ref=ref,
-                token=token,
-                cache_dir=cache_dir,
-                require_token=require_token,
-                prompt=True,
-            )
-        except RuntimeError as e:
-            msg = str(e)
-            if "401" in msg or "403" in msg or "Permission" in msg or "denied" in msg.lower():
-                raise RuntimeError(
-                    "Failed to fetch from GitHub: repository may be private or require authentication. "
-                    "Provide a personal access token via `token=` or set `GITHUB_TOKEN`/`GH_TOKEN` in the environment."
-                ) from e
-            raise
-
-        if not trust_remote_code:
-            return local_path
-
-        # If trusting, construct the caller which will source the script
-        return cls(path_to_renv=path_to_renv, script_path=local_path)
-
-
-def call_r_function_from_github(
-    repo: str,
-    file_path: str,
-    function_name: str,
-    *args,
-    ref: str = "main",
-    token: Optional[str] = None,
-    cache_dir: Optional[Path] = None,
-    path_to_renv: Optional[Path] = None,
-    trust_remote_code: bool = True,
-    require_token: bool = False,
-    **kwargs,
-) -> object:
-    """
-    Convenience helper that downloads an R script from GitHub and calls a function in it.
-
-    Security: by default `trust_remote_code=True` which will execute remote code. For safety
-    set `trust_remote_code=False` to only retrieve the cached file path.
-    """
-    caller_or_path = RFunctionCaller.from_github(
-        repo=repo,
-        file_path=file_path,
-        ref=ref,
-        token=token,
-        cache_dir=cache_dir,
-        path_to_renv=path_to_renv,
-        trust_remote_code=trust_remote_code,
-        require_token=require_token,
-    )
-
-    if not trust_remote_code:
-        return caller_or_path
-
-    # caller_or_path is an RFunctionCaller instance
-    return caller_or_path.call(function_name, *args, **kwargs)
+        raise NotImplementedError(
+            "RFunctionCaller.from_github was removed. Clone repositories locally and pass a local script_path to RFunctionCaller instead."
+        )
 
 
 # %%
@@ -467,7 +392,9 @@ def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# gh_helpers are implemented in `gh_utils.py` and imported above
+# Note: GitHub fetch helpers were removed to keep the API focused on
+# local script invocation. If you need to run remote scripts, clone the
+# repository locally and pass the local `script_path` to `RFunctionCaller`.
 
 
 # %%
