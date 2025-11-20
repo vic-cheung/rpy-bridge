@@ -21,6 +21,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel build twine ruff pytest
 
+      - name: Install package dependencies
+        run: |
+          # Install the package so tests can import runtime dependencies (numpy, pandas, rpy2, ...)
+          python -m pip install -e .
+
       - name: Lint
         run: |
           python -m ruff check --fix . || true
