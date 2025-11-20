@@ -32,6 +32,76 @@ caller = RFunctionCaller(
 summary_df = caller.call("summarize_cohort", cohort_df)
 
 
+## Examples
+
+Basic — run a local R script
+
+```python
+from pathlib import Path
+from rpy_bridge import RFunctionCaller
+
+# If your project uses renv, pass the project directory (parent of renv/)
+project_dir = Path("/path/to/your-r-project")
+script = project_dir / "scripts" / "example.R"
+
+# If you do not use renv, pass None for path_to_renv
+caller = RFunctionCaller(path_to_renv=project_dir, script_path=script)
+result = caller.call("some_function", 42, named_arg="value")
+print(type(result))
+```
+
+Notes:
+
+- `path_to_renv` may be either the project directory (containing `renv/`) or
+  the `renv/` directory itself. When provided, `rpy-bridge` will call
+  `renv::load()` so the R session uses the project's library versions.
+
+Using a script fetched from GitHub (safe defaults)
+
+```python
+from rpy_bridge import call_r_function_from_github
+
+# This only executes the remote code when `trust_remote_code=True`.
+# When False the call returns a cached Path to the downloaded script.
+path = call_r_function_from_github(
+    repo="some-owner/some-repo",
+    file_path="scripts/analysis.R",
+    function_name="analyse",
+    trust_remote_code=False,  # inspect file before running
+)
+
+print("Cached script at:", path)
+```
+
+To execute remote code explicitly (opt-in):
+
+```python
+from rpy_bridge import call_r_function_from_github
+
+# Only set trust_remote_code=True after you've reviewed the script.
+result = call_r_function_from_github(
+    repo="some-owner/some-repo",
+    file_path="scripts/analysis.R",
+    function_name="analyse",
+    trust_remote_code=True,
+    require_token=False,  # set True for private repos
+)
+```
+
+Security & token notes
+
+- `require_token=True` causes the fetch to fail fast if no token is available.
+- When `require_token=True` and a token is not found, `rpy-bridge` will prompt
+  interactively (TTY) to paste a token; set `prompt=False` to disable prompting.
+- Prefer providing `GITHUB_TOKEN` as an env var in CI for non-interactive runs.
+
+Caching
+
+- Downloaded scripts are cached under `~/.cache/rpy-bridge` and keyed by
+  repository and commit SHA so repeated fetches are fast and reproducible.
+
+
+
 ## R Setup
 
 If you plan to execute R code with `rpy-bridge`, use the helper scripts in
