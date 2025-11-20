@@ -104,6 +104,5 @@ result = call_r_function_from_github(
 
 ### Thanks
 
-This package was spun out of internal tooling at a previous employer. Thanks
-to the team for their contributions and for permission to publish this
-extracted utility.
+This package was spun out of internal tooling at Revolution Medicines. Many
+thanks to the team there for allowing the code to be open sourced.
