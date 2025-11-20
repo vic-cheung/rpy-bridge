@@ -29,8 +29,8 @@ Homepage = "https://github.com/vic-cheung/rpy-bridge"
 "Issue Tracker" = "https://github.com/vic-cheung/rpy-bridge/issues"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
 
 [tool.uv]
 dev-dependencies = [
