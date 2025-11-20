@@ -1,0 +1,37 @@
+[project]
+name = "rpy-bridge"
+version = "0.1.0"
+description = "Bridge helpers for calling R from Python via rpy2"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Victoria Cheung", email = "victoriakcheung@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "rpy2>=3.5",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/rpy-bridge"
+"Issue Tracker" = "https://github.com/your-username/rpy-bridge/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+]
