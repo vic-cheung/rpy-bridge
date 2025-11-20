@@ -140,6 +140,24 @@ def fetch_r_script_from_github(
             if attempt == attempts:
                 raise RuntimeError(f"GitHub API request failed after retries: {e}")
         except Exception as e:
+            # If this is an SSL certificate verification error and certifi isn't available,
+            # provide a helpful, actionable error message instead of the raw stack trace.
+            try:
+                is_ssl_err = isinstance(e, ssl.SSLError) or (
+                    hasattr(e, "__cause__") and isinstance(e.__cause__, ssl.SSLError)
+                )
+            except Exception:
+                is_ssl_err = False
+
+            if is_ssl_err and certifi is None:
+                raise RuntimeError(
+                    "SSL certificate verification failed while contacting GitHub. "
+                    "This often happens on macOS or custom Python builds that lack a bundled CA cert store. "
+                    "Install the 'certifi' package in your environment (e.g. `pip install certifi`) "
+                    "or set the environment variable SSL_CERT_FILE to point to a valid CA bundle. "
+                    "If you use Homebrew Python on macOS, run the 'Install Certificates.command' that comes with Python."
+                )
+
             if attempt == attempts:
                 raise RuntimeError(f"Failed to fetch from GitHub after {attempts} attempts: {e}")
             time.sleep(backoff)

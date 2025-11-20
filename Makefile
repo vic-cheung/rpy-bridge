@@ -18,7 +18,7 @@ endif
 setup: ensure-uv
 	test -d .venv || uv venv .venv
 	uv sync --all-extras
-
+	uv run python -m ipykernel install --user --name=rpy-bridge --display-name "rpy-bridge"
 
 # Install main dependencies + your package in editable mode
 install-all:
