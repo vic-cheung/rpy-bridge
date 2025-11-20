@@ -139,6 +139,56 @@ class RFunctionCaller:
         robjects.r(f'source("{self.script_path.as_posix()}")')
         logger.info("R script sourced: {}", self.script_path.name)
 
+    def call(self, function_name: str, *args: object, **kwargs: object) -> object:
+        """
+        Call an R function from the sourced script, and recursively convert &
+        post-process the result.
+
+        Handles:
+        - Direct data.frame
+        - NamedList or ListVector
+        - Nested lists with data.frames inside
+        """
+
+        def _recursive_postprocess(obj):
+            # Handle single DataFrame
+            if isinstance(obj, pd.DataFrame):
+                return postprocess_r_dataframe(obj)
+
+            # Handle dictionary (e.g. NamedList converted)
+            elif isinstance(obj, dict):
+                return {k: _recursive_postprocess(v) for k, v in obj.items()}
+
+            # Handle list of items
+            elif isinstance(obj, list):
+                return [_recursive_postprocess(item) for item in obj]
+
+            return obj  # Primitive values stay as-is
+
+        try:
+            r_func = robjects.globalenv[function_name]
+
+            with localconverter(robjects.default_converter + pandas2ri.converter):
+                r_args = [robjects.conversion.py2rpy(arg) for arg in args]
+                r_kwargs = {k: robjects.conversion.py2rpy(v) for k, v in kwargs.items()}
+                result = r_func(*r_args, **r_kwargs)
+
+            # Step 1: Try direct conversion
+            with localconverter(robjects.default_converter + pandas2ri.converter):
+                py_result = robjects.conversion.rpy2py(result)
+
+            # Step 2: If it's still an R container, convert it
+            if isinstance(py_result, (NamedList, ListVector)):
+                py_result = r_namedlist_to_dict(py_result)
+
+            # Step 3: Recursively process any nested frames
+            return replace_r_na(_recursive_postprocess(py_result))
+
+        except KeyError:
+            raise ValueError(f"Function '{function_name}' not found in the R script.")
+        except Exception as e:
+            raise RuntimeError(f"Error calling R function '{function_name}': {e}")
+
     @classmethod
     def from_github(
         cls,
@@ -248,56 +298,6 @@ def call_r_function_from_github(
 
     # caller_or_path is an RFunctionCaller instance
     return caller_or_path.call(function_name, *args, **kwargs)
-
-    def call(self, function_name: str, *args: object, **kwargs: object) -> object:
-        """
-        Call an R function from the sourced script, and recursively convert &
-        post-process the result.
-
-        Handles:
-        - Direct data.frame
-        - NamedList or ListVector
-        - Nested lists with data.frames inside
-        """
-
-        def _recursive_postprocess(obj):
-            # Handle single DataFrame
-            if isinstance(obj, pd.DataFrame):
-                return postprocess_r_dataframe(obj)
-
-            # Handle dictionary (e.g. NamedList converted)
-            elif isinstance(obj, dict):
-                return {k: _recursive_postprocess(v) for k, v in obj.items()}
-
-            # Handle list of items
-            elif isinstance(obj, list):
-                return [_recursive_postprocess(item) for item in obj]
-
-            return obj  # Primitive values stay as-is
-
-        try:
-            r_func = robjects.globalenv[function_name]
-
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                r_args = [robjects.conversion.py2rpy(arg) for arg in args]
-                r_kwargs = {k: robjects.conversion.py2rpy(v) for k, v in kwargs.items()}
-                result = r_func(*r_args, **r_kwargs)
-
-            # Step 1: Try direct conversion
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                py_result = robjects.conversion.rpy2py(result)
-
-            # Step 2: If it's still an R container, convert it
-            if isinstance(py_result, (NamedList, ListVector)):
-                py_result = r_namedlist_to_dict(py_result)
-
-            # Step 3: Recursively process any nested frames
-            return replace_r_na(_recursive_postprocess(py_result))
-
-        except KeyError:
-            raise ValueError(f"Function '{function_name}' not found in the R script.")
-        except Exception as e:
-            raise RuntimeError(f"Error calling R function '{function_name}': {e}")
 
 
 # %%
