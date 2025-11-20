@@ -32,6 +32,8 @@ from rpy2.robjects.vectors import (
     ListVector,
     StrVector,
 )
+from typing import Optional
+from rpy_bridge.gh_utils import fetch_r_script_from_github
 
 
 # %%
@@ -129,6 +131,85 @@ class RFunctionCaller:
         robjects.r(f'setwd("{self.script_dir.as_posix()}")')
         robjects.r(f'source("{self.script_path.as_posix()}")')
         print(f"[Info] R script sourced: {self.script_path.name}")
+
+    @classmethod
+    def from_github(
+        cls,
+        repo: str,
+        file_path: str,
+        ref: str = "main",
+        token: Optional[str] = None,
+        cache_dir: Optional[Path] = None,
+        path_to_renv: Optional[Path] = None,
+        trust_remote_code: bool = False,
+    ) -> "RFunctionCaller | Path":
+        """
+        Download an R script from a GitHub repository and construct an RFunctionCaller.
+
+        Args:
+            repo: repository in the form "owner/repo".
+            file_path: path to the R script inside the repo (e.g. "scripts/my.R").
+            ref: branch name, tag or commit SHA. Defaults to "main".
+            token: optional GitHub token for private repos. If None, looks at
+                environment variables `GITHUB_TOKEN` or `GH_TOKEN`.
+            cache_dir: optional directory to cache downloaded files. Defaults to
+                `~/.cache/rpy-bridge`.
+            path_to_renv: optional path to renv or project directory to use.
+            trust_remote_code: MUST be True to execute remote code. If False,
+                the function will only return the local cached path.
+
+        Returns:
+            If `trust_remote_code` is True, returns an `RFunctionCaller` instance
+            ready to call functions from the downloaded script. Otherwise returns
+            the `Path` to the cached script so the caller can inspect it first.
+        """
+        if cache_dir is None:
+            cache_dir = Path.home() / ".cache" / "rpy-bridge"
+
+        local_path, sha = fetch_r_script_from_github(
+            repo=repo, path=file_path, ref=ref, token=token, cache_dir=cache_dir
+        )
+
+        if not trust_remote_code:
+            return local_path
+
+        # If trusting, construct the caller which will source the script
+        return cls(path_to_renv=path_to_renv, script_path=local_path)
+
+
+def call_r_function_from_github(
+    repo: str,
+    file_path: str,
+    function_name: str,
+    *args,
+    ref: str = "main",
+    token: Optional[str] = None,
+    cache_dir: Optional[Path] = None,
+    path_to_renv: Optional[Path] = None,
+    trust_remote_code: bool = True,
+    **kwargs,
+) -> object:
+    """
+    Convenience helper that downloads an R script from GitHub and calls a function in it.
+
+    Security: by default `trust_remote_code=True` which will execute remote code. For safety
+    set `trust_remote_code=False` to only retrieve the cached file path.
+    """
+    caller_or_path = RFunctionCaller.from_github(
+        repo=repo,
+        file_path=file_path,
+        ref=ref,
+        token=token,
+        cache_dir=cache_dir,
+        path_to_renv=path_to_renv,
+        trust_remote_code=trust_remote_code,
+    )
+
+    if not trust_remote_code:
+        return caller_or_path
+
+    # caller_or_path is an RFunctionCaller instance
+    return caller_or_path.call(function_name, *args, **kwargs)
 
     def call(self, function_name: str, *args: object, **kwargs: object) -> object:
         """
@@ -346,6 +427,9 @@ def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         except Exception:
             pass  # leave index as-is if not convertible
     return df
+
+
+# gh_helpers are implemented in `gh_utils.py` and imported above
 
 
 # %%
