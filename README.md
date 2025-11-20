@@ -1,24 +1,38 @@
 # rpy-bridge
 
-Utilities for calling R code from Python using `rpy2`, including helpers to
-activate `renv` projects, invoke R functions, and post-process results into
-well-typed pandas DataFrames.
+Utilities for calling R code from Python using `rpy2`. It provides a small
+wrapper that can (optionally) activate an `renv` project, source an R
+script, call functions from that script, and post-process results into
+well-typed pandas `DataFrame` objects.
 
 This project was developed for bilingual teams where some functions are
 authored in R and the primary consumer is a Python-centric developer. It
-acts as a lightweight interoperability layer enabling a Python programmer to
-call and reuse R functions (written and maintained by R authors) without
-rewriting them in Python.
+acts as an interoperability layer so a Python programmer can call and reuse
+R functions (written and maintained by R authors) without reimplementing
+that logic in Python.
 
 ## Installation
 
+Prerequisites
+
+- System R installed and available on `PATH` (rpy2 requires a working R
+  installation).
+- Python 3.12+
+
+Installation
+
+Install from PyPI or as an editable local package during development:
+
 ```bash
-uv add rpy-bridge
+# From PyPI (recommended for consumers)
+python3 -m pip install rpy-bridge
+
+# During development (install editable from local source)
+python3 -m pip install -e .
 ```
 
-The package requires:
+Required Python packages (the installer will pull these in):
 
-- Python 3.12+
 - `rpy2` (GPLv2 or later)
 - `pandas`
 - `numpy`
@@ -58,13 +72,14 @@ print(type(result))
 
 Notes:
 
-- `path_to_renv` may be either the project directory (containing `renv/`) or
-  the `renv/` directory itself. When provided, `rpy-bridge` will call
-  `renv::load()` so the R session uses the project's library versions.
+`path_to_renv` may be either the project directory (containing `renv/`) or
+the `renv/` directory itself. When provided, `RFunctionCaller` will call
+`renv::load()` so the R session uses the project's library versions. If
+`path_to_renv` is `None`, `rpy-bridge` will use whatever R environment is
+visible to the Python process (system R or an R environment you activated
+before starting Python).
 
-Remote fetch helpers were removed from this package to keep the API surface
-small and avoid environment-specific SSL and token handling issues. The
-intended workflow is:
+The intended workflow is:
 
 - Clone or download the R script into your local filesystem (review the
   code if it came from a remote source).
@@ -74,10 +89,10 @@ intended workflow is:
 This keeps network, token, and SSL concerns outside the package while
 preserving an easy path for Python-first users to call R-written functions.
 
-If you need to run an R script from a remote repository, clone the repository
-locally (or download the script using your preferred tooling), review the
-script if necessary, and then construct an `RFunctionCaller` with the local
-`script_path`:
+If you need to run an R script from a remote repository, clone or download
+the script locally, review it, and then construct an `RFunctionCaller`
+pointing at the local `script_path`. This keeps network, token, and SSL
+concerns outside the package and avoids environment-specific failures.
 
 ```python
 from rpy_bridge import RFunctionCaller
@@ -86,10 +101,8 @@ project_dir = Path("/path/to/cloned/repo")
 script = project_dir / "scripts" / "analysis.R"
 
 caller = RFunctionCaller(path_to_renv=None, script_path=script)
-result = caller.call("analyse", some_arg=42)
+result = caller.call("analyze", some_arg=42)
 ```
-
-
 
 ## R Setup
 
@@ -119,16 +132,15 @@ libraries and R packages and should be run from a trusted environment. For
 CI, use `r-lib/actions/setup-r` to install R, then run the `Rscript` command
 above to prepare the `renv` environment.
 
-Collaboration note
+## Collaboration note
 
 This repository provides example R setup scripts for teams working across
 Python and R. Each project may require different R packages — check the
 package list in `examples/r-deps/setup_env.R` and commit a `renv.lock` for
 project-specific reproducibility.
 
-Note: Remote fetch helpers were intentionally removed; token discovery and
-GitHub API interactions are no longer part of this package. Clone repositories
-locally or use your preferred tooling to obtain scripts before execution.
+Clone repositories containing R scripts locally or use your
+preferred tooling to obtain scripts before execution.
 
 ## Licensing
 
@@ -140,5 +152,5 @@ locally or use your preferred tooling to obtain scripts before execution.
 
 ### Thanks
 
-This package was spun out of internal tooling at Revolution Medicines. Many
-thanks to the team there for allowing the code to be open sourced.
+This package was spun out of internal tooling at Revolution Medicines.
+Many thanks to the team there for allowing the code to be open sourced.

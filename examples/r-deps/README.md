@@ -88,5 +88,4 @@ teams that mix Python and R work. Important notes:
   This keeps the R source and its dependencies co-located and easier to test.
 - For reproducibility, commit a `renv.lock` from a known-working environment
   to your project repository and use `renv::restore()` on CI and new machines.
-
-
+- If your project has special system library needs, adapt or extend the system setup scripts as needed.
