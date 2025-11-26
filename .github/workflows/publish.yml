@@ -53,7 +53,7 @@ jobs:
           REPOSITORY_URL: ${{ secrets.REPOSITORY_URL }}
         run: |
           if [ -n "$PYPI_API_TOKEN" ]; then
-            python -m twine upload --non-interactive --repository-url ${REPOSITORY_URL:-https://upload.pypi.org/legacy/} -u __token__ -p "$PYPI_API_TOKEN" dist/*;
+            python -m twine upload --non-interactive --verbose --repository-url ${REPOSITORY_URL:-https://upload.pypi.org/legacy/} -u __token__ -p "$PYPI_API_TOKEN" dist/*;
           else
-            python -m twine upload --non-interactive --repository-url ${REPOSITORY_URL:-https://upload.pypi.org/legacy/} -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD" dist/*;
+            python -m twine upload --non-interactive --verbose --repository-url ${REPOSITORY_URL:-https://upload.pypi.org/legacy/} -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD" dist/*;
           fi
