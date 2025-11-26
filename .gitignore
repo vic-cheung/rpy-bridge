@@ -10,6 +10,7 @@ build/
 /.coverage
 coverage.xml
 htmlcov/
+*.code-workspace
 
 # macOS
 .DS_Store
