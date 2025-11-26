@@ -11,6 +11,8 @@ acts as an interoperability layer so a Python programmer can call and reuse
 R functions (written and maintained by R authors) without reimplementing
 that logic in Python.
 
+**Latest release:** [`rpy-bridge` on PyPI](https://pypi.org/project/rpy-bridge/)
+
 ## Installation
 
 Prerequisites
@@ -21,14 +23,32 @@ Prerequisites
 
 Installation
 
-Install from PyPI or as an editable local package during development:
+**From PyPI:**
+
+Using pip:
 
 ```bash
-# From PyPI (recommended for consumers)
 python3 -m pip install rpy-bridge
+```
 
-# During development (install editable from local source)
+Using uv:
+
+```bash
+uv add rpy-bridge
+```
+
+**During development:**
+
+Using pip:
+
+```bash
 python3 -m pip install -e .
+```
+
+Using uv:
+
+```bash
+uv sync
 ```
 
 Required Python packages (the installer will pull these in):
