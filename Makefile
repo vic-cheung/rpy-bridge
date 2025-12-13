@@ -30,8 +30,10 @@ ruff:
 
 format: ruff
 
-lint:
-	uv run ruff check .
+ty:
+	uv run ty check .
+
+lint: ruff ty
 
 test:
 	uv run pytest -q
