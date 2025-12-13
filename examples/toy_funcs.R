@@ -17,3 +17,11 @@ multiply_table <- function(a, b, times = 3) {
   )
   return(df)
 }
+
+# Returns a list of data.frames
+make_list_of_dfs <- function() {
+    list(
+        df1 = data.frame(a = 1:3),
+        df2 = data.frame(b = 4:6)
+    )
+}

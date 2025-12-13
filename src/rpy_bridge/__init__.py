@@ -16,7 +16,7 @@ from .rpy2_utils import (
     normalize_dtypes,
     normalize_single_df_dtypes,
     postprocess_r_dataframe,
-    replace_r_na,
+    clean_r_missing,
     r_namedlist_to_dict,
 )
 
@@ -26,7 +26,7 @@ __all__ = [
     "r_namedlist_to_dict",
     "clean_r_dataframe",
     "fix_string_nans",
-    "replace_r_na",
+    "clean_r_missing",
     "normalize_single_df_dtypes",
     "fix_r_dataframe_types",
     "postprocess_r_dataframe",

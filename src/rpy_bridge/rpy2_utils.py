@@ -16,6 +16,8 @@ import warnings
 warnings.filterwarnings("ignore", message="Environment variable .* redefined by R")
 
 from pathlib import Path
+import sys
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -30,18 +32,73 @@ except Exception:
 
 
 # ---------------------------------------------------------------------
-# Lazy, one-time rpy2 import machinery
+# R detection and rpy2 installation
 # ---------------------------------------------------------------------
-_RPY2 = None
+def ensure_rpy2_installed(r_home: str):
+    os.environ["R_HOME"] = r_home
+    try:
+        import rpy2  # noqa: F401
+    except ImportError:
+        logger.info(
+            f"[Info] rpy2 not installed or incompatible with R_HOME={r_home}. Installing..."
+        )
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--force-reinstall", "rpy2"]
+        )
+        import rpy2  # noqa: F401
 
 
-def _require_rpy2():
-    """
-    Lazily import rpy2 and cache symbols.
+def find_r_home():
+    try:
+        r_home = subprocess.check_output(
+            ["R", "--vanilla", "--slave", "-e", "cat(R.home())"],
+            stderr=subprocess.PIPE,
+            text=True,
+        ).strip()
+        if r_home.endswith(">"):
+            r_home = r_home[:-1].strip()
+        return r_home
+    except FileNotFoundError:
+        possible_paths = [
+            "/usr/lib/R",
+            "/usr/local/lib/R",
+            "/opt/homebrew/Cellar/r/4.5.2/lib/R",  # Homebrew macOS
+            "C:\\Program Files\\R\\R-4.5.2",  # Windows
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                return p
+        return None
 
-    This prevents ReadTheDocs and other environments without R installed
-    from failing at import time.
-    """
+
+R_HOME = find_r_home()
+if not R_HOME:
+    raise RuntimeError("R not found. Please install R or add it to PATH.")
+
+logger.info(f"R_HOME = {R_HOME}")
+os.environ["R_HOME"] = R_HOME
+ensure_rpy2_installed(R_HOME)
+
+# macOS dynamic library path
+if sys.platform == "darwin":
+    lib_path = os.path.join(R_HOME, "lib")
+    if lib_path not in os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", ""):
+        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = (
+            f"{lib_path}:{os.environ.get('DYLD_FALLBACK_LIBRARY_PATH','')}"
+        )
+
+elif sys.platform.startswith("linux"):
+    lib_path = os.path.join(R_HOME, "lib")
+    ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = f"{lib_path}:{ld_path}"
+
+# ---------------------------------------------------------------------
+# Lazy rpy2 import machinery
+# ---------------------------------------------------------------------
+_RPY2: dict | None = None
+
+
+def _require_rpy2(raise_on_missing: bool = True) -> dict | None:
     global _RPY2
     if _RPY2 is not None:
         return _RPY2
@@ -77,74 +134,76 @@ def _require_rpy2():
         return _RPY2
 
     except ImportError as e:
-        raise RuntimeError(
-            "R support requires optional dependency.\n"
-            "Install with: pip install rpy-bridge[r]"
-        ) from e
+        if raise_on_missing:
+            raise RuntimeError(
+                "R support requires optional dependency `rpy2`. Install with: pip install rpy-bridge[r]"
+            ) from e
+        return None
 
 
-# %%
+def _ensure_rpy2() -> dict:
+    global _RPY2
+    if _RPY2 is None:
+        _RPY2 = _require_rpy2()
+    return _RPY2
+
+
+# ---------------------------------------------------------------------
+# Activate renv
+# ---------------------------------------------------------------------
 def activate_renv(path_to_renv: Path) -> None:
-    """
-    Activates the renv environment using renv::load() to ensure the correct project is loaded.
-    This avoids sourcing activate.R directly and avoids accidentally initializing a new environment.
-
-    Accepts either:
-    - Direct path to renv directory (e.g., /path/to/renv)
-    - Parent directory containing renv/ folder (e.g., /path/to/repos where renv/ is inside)
-    """
-    r = _require_rpy2()
+    r = _ensure_rpy2()
     robjects = r["robjects"]
 
     path_to_renv = path_to_renv.resolve()
-
-    # Determine if path_to_renv is the renv directory itself or its parent
     if path_to_renv.name == "renv" and (path_to_renv / "activate.R").exists():
         renv_dir = path_to_renv
-        renv_project_dir = path_to_renv.parent
+        project_dir = path_to_renv.parent
     else:
         renv_dir = path_to_renv / "renv"
-        renv_project_dir = path_to_renv
+        project_dir = path_to_renv
 
     renv_activate = renv_dir / "activate.R"
-    renv_lock = renv_project_dir / "renv.lock"
+    renv_lock = project_dir / "renv.lock"
 
     if not renv_activate.exists() or not renv_lock.exists():
-        raise FileNotFoundError(
-            f"[Error] renv environment not found or incomplete.\n"
-            f"  Expected activate.R at: {renv_activate}\n"
-            f"  Expected renv.lock at: {renv_lock}\n"
-            f"  Provided path: {path_to_renv}"
-        )
+        raise FileNotFoundError(f"[Error] renv environment incomplete: {path_to_renv}")
 
-    # Optional: set R_ENVIRON_USER if .Renviron exists
-    renviron_file = renv_project_dir / ".Renviron"
+    renviron_file = project_dir / ".Renviron"
     if renviron_file.is_file():
         os.environ["R_ENVIRON_USER"] = str(renviron_file)
         logger.info("R_ENVIRON_USER set to: {}", renviron_file)
 
-    # Load the renv package
+    rprofile_file = project_dir / ".Rprofile"
+    if rprofile_file.is_file():
+        robjects.r(f'source("{rprofile_file.as_posix()}")')
+        logger.info(".Rprofile sourced: {}", rprofile_file)
+
     try:
-        robjects.r("library(renv)")
+        robjects.r("suppressMessages(library(renv))")
     except Exception:
-        print("[Info] renv package not found in R. Attempting to install...")
-        robjects.r('install.packages("renv", repos="https://cloud.r-project.org")')
+        logger.info("Installing renv package in project library...")
+        robjects.r(
+            f'install.packages("renv", repos="https://cloud.r-project.org", lib="{renv_dir / "library"}")'
+        )
         robjects.r("library(renv)")
 
-    try:
-        logger.info("Using R at: {}", robjects.r("R.home()")[0])
-        robjects.r(f'renv::load("{renv_project_dir.as_posix()}")')
-        logger.info("renv environment loaded for project: {}", renv_project_dir)
-    except Exception as e:
-        raise RuntimeError(f"[Error] Failed to load renv environment: {e}")
-
-    logger.debug(".libPaths(): {}", robjects.r(".libPaths()"))
+    robjects.r(f'renv::load("{project_dir.as_posix()}")')
+    logger.info("renv environment loaded for project: {}", project_dir)
 
 
-# %%
+# ---------------------------------------------------------------------
+# RFunctionCaller
+# ---------------------------------------------------------------------
 class RFunctionCaller:
     """
-    A utility class to load and execute R functions from a specified R script using rpy2.
+    Utility to load and call R functions from a script, lazily loading rpy2 and activating renv.
+
+    Supports:
+    - Scripts with custom functions
+    - Base R functions
+    - Functions in installed packages
+    - Automatic conversion of Python types (lists, dicts, scalars, pandas DataFrames) to R objects
     """
 
     def __init__(
@@ -153,228 +212,439 @@ class RFunctionCaller:
         script_path: Path | None = None,
         packages: list[str] | None = None,
     ):
-        """
-        Initialize the RFunctionCaller.
-        """
-        self._r = _require_rpy2()
-        self.ro = self._r["ro"]
-        self.robjects = self._r["robjects"]
-        self.pandas2ri = self._r["pandas2ri"]
-        self.localconverter = self._r["localconverter"]
-        self.IntVector = self._r["IntVector"]
-        self.FloatVector = self._r["FloatVector"]
-        self.ListVector = self._r["ListVector"]
-        self.NamedList = self._r["NamedList"]
-
         self.path_to_renv = path_to_renv.resolve() if path_to_renv else None
         self.script_path = script_path.resolve() if script_path else None
+        self.packages = packages or None
+
+        # Lazy-loaded attributes
+        self._r = None
+        self.ro = None
+        self.robjects = None
+        self.pandas2ri = None
+        self.localconverter = None
+        self.IntVector = None
+        self.FloatVector = None
+        self.BoolVector = None
+        self.StrVector = None
+        self.ListVector = None
+        self.NamedList = None
 
         if self.script_path and not self.script_path.exists():
             raise FileNotFoundError(f"R script not found: {self.script_path}")
 
         self.script_dir = self.script_path.parent if self.script_path else None
-        self.packages = packages or None
+        self._script_loaded = False
+        self._renv_activated = False
+        self._packages_loaded = False
 
-        self._load_script()
+    # -----------------------------------------------------------------
+    # Internal: lazy R loading
+    # -----------------------------------------------------------------
+    def _ensure_r_loaded(self):
+        if self._r is None:
+            r = _require_rpy2(raise_on_missing=True)
+            self._r = r
+            self.ro = r["ro"]
+            self.robjects = r["robjects"]
+            self.pandas2ri = r["pandas2ri"]
+            self.localconverter = r["localconverter"]
+            self.IntVector = r["IntVector"]
+            self.FloatVector = r["FloatVector"]
+            self.BoolVector = r["BoolVector"]
+            self.StrVector = r["StrVector"]
+            self.ListVector = r["ListVector"]
+            self.NamedList = r["NamedList"]
 
-    def _load_script(self):
-        if self.path_to_renv:
+        # Activate renv
+        if self.path_to_renv and not self._renv_activated:
             activate_renv(self.path_to_renv)
-        else:
-            logger.info("No renv path provided; using base or current environment.")
+            self._renv_activated = True
 
-        if self.packages:
+        # Load packages
+        if self.packages and not self._packages_loaded:
             for pkg in self.packages:
                 try:
-                    self.robjects.r(f'library("{pkg}")')
+                    self.robjects.r(f'suppressMessages(library("{pkg}"))')
                 except Exception:
+                    logger.info("Package '{}' not found. Installing...", pkg)
                     self.robjects.r(
                         f'install.packages("{pkg}", repos="https://cloud.r-project.org")'
                     )
-                    self.robjects.r(f'library("{pkg}")')
+                    self.robjects.r(f'suppressMessages(library("{pkg}"))')
+            self._packages_loaded = True
 
-        if self.script_path:
+        # Source script
+        if self.script_path and not self._script_loaded:
             self.robjects.r(f'setwd("{self.script_dir.as_posix()}")')
             self.robjects.r(f'source("{self.script_path.as_posix()}")')
             logger.info("R script sourced: {}", self.script_path.name)
+            self._script_loaded = True
+
+    # -----------------------------------------------------------------
+    # Python -> R conversion
+    # -----------------------------------------------------------------
+    def _py2r(self, obj):
+        """
+        Convert Python objects to R objects safely, including pd.NA and None.
+        Handles edge cases like empty lists for atomic vectors.
+        """
+        self._ensure_r_loaded()
+        robjects = self.robjects
+        pandas2ri = self.pandas2ri
+        IntVector = self.IntVector
+        FloatVector = self.FloatVector
+        BoolVector = self.BoolVector
+        StrVector = self.StrVector
+        ListVector = self.ListVector
+        localconverter = self.localconverter
+
+        import pandas as pd
+        import rpy2.robjects.vectors as rvec
+
+        # Already an R object
+        if isinstance(
+            obj,
+            (
+                rvec.IntVector,
+                rvec.FloatVector,
+                rvec.BoolVector,
+                rvec.StrVector,
+                rvec.ListVector,
+                robjects.DataFrame,
+            ),
+        ):
+            return obj
+
+        with localconverter(robjects.default_converter + pandas2ri.converter):
+            # None / NaN / pd.NA → R NULL
+            if obj is None or (isinstance(obj, float) and pd.isna(obj)) or obj is pd.NA:
+                return robjects.NULL
+
+            # pandas DataFrame → data.frame
+            import pandas as pd
+
+            if isinstance(obj, pd.DataFrame):
+                return pandas2ri.py2rpy(obj)
+
+            # Scalars
+            if isinstance(obj, (int, float, bool, str)):
+                return obj
+
+            # Lists
+            if isinstance(obj, list):
+                # Empty list → R numeric(0) by default (atomic vector)
+                if len(obj) == 0:
+                    return FloatVector([])  # safe default for sum(), mean(), etc.
+
+                # Detect type safely
+                is_int = all(
+                    (isinstance(x, int) or x is None or x is pd.NA) for x in obj
+                )
+                is_float = all(
+                    (isinstance(x, (int, float)) or x is None or x is pd.NA)
+                    for x in obj
+                )
+                is_bool = all(
+                    (isinstance(x, bool) or x is None or x is pd.NA) for x in obj
+                )
+                is_str = all(
+                    (isinstance(x, str) or x is None or x is pd.NA) for x in obj
+                )
+
+                if is_int:
+                    return IntVector(
+                        [
+                            robjects.NA_Integer if x is None or x is pd.NA else x
+                            for x in obj
+                        ]
+                    )
+                elif is_float:
+                    return FloatVector(
+                        [
+                            robjects.NA_Real if x is None or x is pd.NA else x
+                            for x in obj
+                        ]
+                    )
+                elif is_bool:
+                    return BoolVector(
+                        [
+                            robjects.NA_Logical if x is None or x is pd.NA else x
+                            for x in obj
+                        ]
+                    )
+                elif is_str:
+                    return StrVector(
+                        [
+                            robjects.NA_Character if x is None or x is pd.NA else x
+                            for x in obj
+                        ]
+                    )
+
+                # Mixed / nested → recursive ListVector
+                return ListVector({str(i): self._py2r(x) for i, x in enumerate(obj)})
+
+            # Dict → NamedList
+            if isinstance(obj, dict):
+                return ListVector({k: self._py2r(v) for k, v in obj.items()})
+
+            raise NotImplementedError(f"Cannot convert Python object to R: {type(obj)}")
+
+    # -----------------------------------------------------------------
+    # R -> Python conversion
+    # -----------------------------------------------------------------
+    def _r2py(self, obj):
+        """
+        Convert R objects to Python objects.
+        Handles data.frame, NamedList/ListVector, vectors, scalars, NULL.
+        """
+        r = self._r
+        robjects = self.robjects
+        NamedList = self.NamedList
+        ListVector = self.ListVector
+        StrVector = self.StrVector
+        IntVector = self.IntVector
+        FloatVector = self.FloatVector
+        BoolVector = self.BoolVector
+        NULLType = r["NULLType"]
+        lc = self.localconverter
+        pandas2ri = self.pandas2ri
+
+        # --- NULL ---
+        if isinstance(obj, NULLType):
+            return None
+
+        # --- data.frame ---
+        if isinstance(obj, robjects.DataFrame):
+            with lc(robjects.default_converter + pandas2ri.converter):
+                df = robjects.conversion.rpy2py(obj)
+            from .rpy2_utils import postprocess_r_dataframe
+
+            return postprocess_r_dataframe(df)
+
+        # --- NamedList / ListVector ---
+        if isinstance(obj, (NamedList, ListVector)):
+            names = obj.names if not callable(obj.names) else obj.names()
+            result = {}
+            for i, val in enumerate(obj):
+                key = names[i] if names and i < len(names) else str(i)
+                result[key] = self._r2py(val)
+            return result
+
+        # --- Atomic vectors ---
+        if isinstance(obj, (StrVector, IntVector, FloatVector, BoolVector)):
+            py_list = []
+            for v in obj:
+                if v in (robjects.NA_Logical, robjects.NA_Integer, robjects.NA_Real):
+                    py_list.append(np.nan)
+                elif v is robjects.NA_Character:
+                    py_list.append(None)
+                else:
+                    py_list.append(v)
+
+            # --- Return scalar if length-1 ---
+            if len(py_list) == 1:
+                return py_list[0]
+            return py_list
+
+        # fallback: scalar
+        return obj
+
+    # -----------------------------------------------------------------
+    # Public: ensure R package is available
+    # -----------------------------------------------------------------
+    def ensure_r_package(self, pkg_name: str):
+        r = self.robjects.r
+        try:
+            r(f'suppressMessages(library("{pkg_name}", character.only=TRUE))')
+        except Exception:
+            r(f'install.packages("{pkg_name}", repos="https://cloud.r-project.org")')
+            r(f'suppressMessages(library("{pkg_name}", character.only=TRUE))')
+
+    # -----------------------------------------------------------------
+    # Public: call an R function
+    # -----------------------------------------------------------------
+    def call(self, func_name: str, *args, **kwargs):
+        """
+        Call an R function safely. Supports:
+        - functions defined in scripts
+        - base R functions
+        - functions in loaded packages
+        """
+        self._ensure_r_loaded()
+
+        # --- Find the function ---
+        try:
+            func = self.robjects.globalenv[func_name]  # script-defined
+        except KeyError:
+            try:
+                func = self.robjects.r[func_name]  # base or package function
+            except KeyError:
+                raise ValueError(f"R function '{func_name}' not found.")
+
+        # --- Convert Python args to R ---
+        r_args = [self._py2r(a) for a in args]
+        r_kwargs = {k: self._py2r(v) for k, v in kwargs.items()}
+
+        # --- Call safely ---
+        try:
+            result = func(*r_args, **r_kwargs)
+        except Exception as e:
+            raise RuntimeError(f"Error calling R function '{func_name}': {e}")
+
+        # --- Convert R result back to Python ---
+        return self._r2py(result)
 
 
 # %%
-def r_namedlist_to_dict(namedlist: object) -> object:
+# ------------------------------
+# Utility functions for R ↔ Python
+# ------------------------------
+
+
+def r_namedlist_to_dict(namedlist, caller: RFunctionCaller):
     """
     Recursively convert an R NamedList or ListVector to a Python dictionary.
-    - Unwrap atomic R vectors (StrVector, IntVector, etc.) into Python lists or dicts if named.
-    - Convert data.frames to pandas DataFrames.
-    - Handles NULL or unnamed cases gracefully.
+    Uses the caller._r2py method for nested conversions.
     """
+    r = _ensure_rpy2()
+    robjects = r["robjects"]
+    NamedList = r["NamedList"]
+    ListVector = r["ListVector"]
+    StrVector = r["StrVector"]
+    IntVector = r["IntVector"]
+    FloatVector = r["FloatVector"]
+    BoolVector = r["BoolVector"]
+    NULLType = r["NULLType"]
 
-    # -------------------------------------------
-    # Handle named lists (NamedList or ListVector)
-    # -------------------------------------------
     if isinstance(namedlist, (NamedList, ListVector)):
         names = namedlist.names if not callable(namedlist.names) else namedlist.names()
         result = {}
+        for i, val in enumerate(namedlist):
+            key = names[i] if names and i < len(names) else str(i)
+            result[str(key)] = caller._r2py(val)
+        return result
 
-        # Only iterate if names is not NULL
-        if not isinstance(names, NULLType):
-            for key, value in zip(names, namedlist):
-                key_str = (
-                    str(key)
-                    if key is not None and not isinstance(key, NULLType)
-                    else None
-                )
-                if key_str:
-                    result[key_str] = r_namedlist_to_dict(value)
-            return result
-
-        # If no names, fallback to a list
-        return [r_namedlist_to_dict(value) for value in namedlist]
-
-    # -------------------------------------------
-    # Handle atomic vectors (StrVector, IntVector, etc.)
-    # These may have names (e.g., c(a = 1, b = 2)) — if so, return a dict.
-    # Otherwise, convert to plain Python list.
-    # -------------------------------------------
     if isinstance(namedlist, (StrVector, IntVector, FloatVector, BoolVector)):
-        names = namedlist.names if not callable(namedlist.names) else namedlist.names()
-        if not isinstance(names, NULLType):
-            return {
-                str(n): v
-                for n, v in zip(names, list(namedlist))
-                if n is not None and not isinstance(n, NULLType)
-            }
         return list(namedlist)
 
-    # -------------------------------------------
-    # Attempt conversion via pandas2ri — works for data.frames, tibbles, etc.
-    # If it fails, fall back to returning the original R object.
-    # -------------------------------------------
-    with localconverter(robjects.default_converter + pandas2ri.converter):
-        try:
-            return robjects.conversion.rpy2py(namedlist)
-        except Exception:
-            return namedlist
+    return caller._r2py(namedlist)
 
 
-# %%
-def clean_r_dataframe(r_df: object) -> object:
+def clean_r_dataframe(r_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Clean an R data.frame object by removing common non-structural attributes
-    like .groups and .rows.
+    Clean an R data.frame by removing non-structural attributes like .groups and .rows.
     """
     for attr in [".groups", ".rows"]:
         try:
-            del r_df.attr[attr]
+            del r_df.attrs[attr]
         except (KeyError, AttributeError):
             pass
     return r_df
 
 
-# %%
 def fix_string_nans(df: pd.DataFrame) -> pd.DataFrame:
-    # Replace common string versions of NA/NaN with actual pd.NA
+    """
+    Replace string NAs or empty strings with pd.NA.
+    """
     return df.replace(["nan", "NaN", "NA", "na", ""], pd.NA)
 
 
-# %%
-def replace_r_na(obj: object) -> object:
-    """
-    Recursively replace R NA_Character with np.nan in any structure.
-    """
-    # Handle DataFrame
-    if isinstance(obj, pd.DataFrame):
-        return (
-            obj.replace({ro.NA_Character: np.nan}, regex=False)
-            if hasattr(ro, "NA_Character")
-            else obj
-        )
-    elif isinstance(obj, dict):
-        return {k: replace_r_na(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [replace_r_na(item) for item in obj]
-    elif hasattr(ro, "NA_Character") and obj is ro.NA_Character:
-        return np.nan
-    else:
-        return obj
-
-
-# %%
 def normalize_single_df_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize dtypes in a single DataFrame after R conversion.
+    """
     df = df.replace(["", "nan", "NaN", "NA", "na"], pd.NA)
 
     for col in df.columns:
         series = df[col]
-
-        # Try converting object/string columns to numeric if possible
         if pd.api.types.is_object_dtype(series):
             coerced = pd.to_numeric(series, errors="coerce")
-            # Replace column if conversion produced fewer NaNs (meaning more numeric)
             if coerced.notna().sum() >= series.notna().sum() * 0.5:
                 df[col] = coerced
-
-        # Cast integer columns with NA to float to accommodate pd.NA
-        if pd.api.types.is_integer_dtype(df[col]):
-            if df[col].isna().any():
-                df[col] = df[col].astype("float64")
-
+        if pd.api.types.is_integer_dtype(df[col]) and df[col].isna().any():
+            df[col] = df[col].astype("float64")
     return df
 
 
-# %%
 def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Post-process a DataFrame converted from R via rpy2:
-    - Converts numeric columns that represent R dates into datetime
-    - Converts timezone-aware datetimes to naive datetimes
-    - Replaces R's NA_integer_ sentinel (-2147483648) with pd.NA
+    Post-process R DataFrame:
+    - Convert R NA_integer_ sentinel (-2147483648) to pd.NA
+    - Convert R-style numeric dates to datetime
+    - Remove timezone from datetime columns
     """
     for col in df.columns:
         series = df[col]
 
-        # Fix R's NA_integer_ sentinel (-2147483648)
         if pd.api.types.is_integer_dtype(series):
-            if (series == -2147483648).any():
-                df[col] = series.mask(series == -2147483648, pd.NA)
+            df[col] = series.mask(series == -2147483648, pd.NA)
 
-        # Convert R-style date columns (days since 1970) to datetime
         if pd.api.types.is_numeric_dtype(series):
             values = series.dropna()
             if not values.empty and values.between(10000, 40000).all():
                 try:
-                    # "1970-01-01" is the reference date for Unix Epoch
                     df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(
                         series, unit="D"
                     )
                 except Exception:
                     pass
 
-        # Remove timezone from datetime columns (e.g., POSIXct with tz)
         if pd.api.types.is_datetime64tz_dtype(series):
             df[col] = series.dt.tz_localize(None)
 
     return df
 
 
-# %%
 def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply a series of fixes to a DataFrame converted from R:
+    - Type corrections
+    - String NA normalization
+    - Index normalization
+    """
     df = fix_r_dataframe_types(df)
     df = fix_string_nans(df)
     df = normalize_single_df_dtypes(df)
 
-    # Normalize R-style string index starting from "1"
     if df.index.dtype == object:
         try:
             int_index = df.index.astype(int)
-            if (int_index == (np.arange(len(df)) + 1)).all():
+            if (int_index == np.arange(len(df)) + 1).all():
                 df.index = pd.RangeIndex(start=0, stop=len(df))
         except Exception:
-            pass  # leave index as-is if not convertible
+            pass
     return df
 
 
-# Note: GitHub fetch helpers were removed to keep the API focused on
-# local script invocation. If you need to run remote scripts, clone the
-# repository locally and pass the local `script_path` to `RFunctionCaller`.
+def clean_r_missing(obj, caller: RFunctionCaller):
+    """
+    Recursively convert R-style missing values to pandas/NumPy:
+    - NA_integer_, NA_real_, NA_logical_ → np.nan
+    - NA_character_ → pd.NA
+    """
+    r = _ensure_rpy2()
+    ro = r["robjects"]
+
+    NA_MAP = {
+        getattr(ro, "NA_Real", None): np.nan,
+        getattr(ro, "NA_Integer", None): np.nan,
+        getattr(ro, "NA_Logical", None): np.nan,
+        getattr(ro, "NA_Character", None): pd.NA,
+    }
+
+    if isinstance(obj, pd.DataFrame):
+        for col in obj.columns:
+            obj[col] = obj[col].apply(lambda x: clean_r_missing(x, caller))
+        return obj
+
+    elif isinstance(obj, dict):
+        return {k: clean_r_missing(v, caller) for k, v in obj.items()}
+
+    elif isinstance(obj, list):
+        return [clean_r_missing(v, caller) for v in obj]
+
+    else:
+        return NA_MAP.get(obj, obj)
 
 
 # %%
