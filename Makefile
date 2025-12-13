@@ -1,4 +1,4 @@
-.PHONY: ensure-uv setup install-all ruff format lint test clean
+.PHONY: ensure-uv setup install-all ruff format lint ty test clean
 
 # Detect uv binary (empty if not found)
 UV_BIN := $(shell command -v uv 2>/dev/null)
@@ -13,7 +13,6 @@ else
 	@echo "[info] Using uv: $(UV_BIN)"
 endif
 
-
 # Create venv & install main + dev deps
 setup: ensure-uv
 	test -d .venv || uv venv .venv
@@ -24,14 +23,37 @@ setup: ensure-uv
 install-all:
 	uv pip install -e ".[dev]"
 
-
 ruff:
 	uv run ruff check . --fix
 
 format: ruff
 
+# --------------------------------------
+# Type checking with timestamped output
+# --------------------------------------
+TY_DIR := $(CURDIR)/.ty_checks
+TY_TIMESTAMP := $(shell date +%Y%m%d_%H%M%S)
+TY_OUTPUT := $(TY_DIR)/ty_$(TY_TIMESTAMP).txt
+UNAME_S := $(shell uname -s)
+
 ty:
-	uv run ty check .
+	@mkdir -p $(TY_DIR)
+	@echo "Running ty..."
+	@TY_OUTPUT=$(TY_DIR)/ty_$(shell date +%Y%m%d_%H%M%S).txt; \
+	uv run ty check . > $$TY_OUTPUT 2>&1; \
+	if grep -q "error\[" $$TY_OUTPUT; then \
+		echo "[Type errors found] See details: $$TY_OUTPUT"; \
+		case "$$(uname -s)" in \
+			Darwin) open $$TY_OUTPUT ;; \
+			Linux) xdg-open $$TY_OUTPUT ;; \
+			Windows_NT) start $$TY_OUTPUT ;; \
+			*) echo "Cannot auto-open file on this OS. File saved as: $$TY_OUTPUT" ;; \
+		esac; \
+	else \
+		echo "✅ Type check passed! No errors."; \
+		rm -f $$TY_OUTPUT; \
+	fi
+
 
 lint: ruff ty
 

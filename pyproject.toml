@@ -9,7 +9,6 @@ authors = [
 ]
 requires-python = ">=3.11"
 
-# Core dependencies: safe to install without system R
 dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
@@ -26,21 +25,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# R-backed functionality
-r = [
-    "rpy2>=3.5",
-]
-
-# Interactive / notebook usage
-dev = [
-    "ipykernel>=7.1.0",
-]
-
-# Documentation build dependencies (optional but recommended)
-docs = [
-    "sphinx",
-    "myst-parser",
-]
+r = ["rpy2>=3.5"]
+dev = ["ipykernel>=7.1.0"]
+docs = ["sphinx", "myst-parser"]
 
 [project.urls]
 Homepage = "https://github.com/vic-cheung/rpy-bridge"
@@ -50,6 +37,9 @@ Homepage = "https://github.com/vic-cheung/rpy-bridge"
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+# -------------------------------
+# uv dev dependencies
+# -------------------------------
 [tool.uv]
 dev-dependencies = [
     "ruff>=0.6",
@@ -57,4 +47,27 @@ dev-dependencies = [
     "build>=1.0",
     "twine>=4.0",
     "certifi>=2025.0",
+    "ty>=0.0.1a34",
 ]
+
+# -------------------------------
+# Ruff configuration
+# -------------------------------
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # optional, ignore long lines
+
+# -------------------------------
+# Ty configuration
+# -------------------------------
+[tool.ty.environment]
+root = ["src/rpy_bridge"]
+
+[tool.ty.rules]
+possibly-missing-attribute = "ignore" # suppress warnings from rpy2 dynamic attributes
+non-subscriptable = "ignore" # suppress errors when typing unknown dict-like objects e.g. NULLType = r["NULLType"]
+call-non-callable = "ignore" # suppress errors for dynamic callable objects
+# invalid-assignment = "ignore" # suppress errors for dynamic dict assignment
+# invalid-return-type = "ignore" # suppress return type mismatch warnings
+unresolved-import = "ignore" # suppress errors for unable to resolve imported module
