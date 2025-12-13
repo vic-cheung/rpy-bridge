@@ -1,0 +1,24 @@
+version: 2
+build:
+  os: ubuntu-20.04
+  tools:
+    python: "3.11"
+
+python:
+  install:
+    # Install the project in editable mode but do NOT install dependencies
+    # (rpy2 requires a system R install and would fail on RTD). Docs
+    # dependencies are installed explicitly below.
+    - method: pip
+      path: .
+      extra_args: ["--no-deps"]
+    - requirements: docs/requirements.txt
+
+env:
+  variables:
+    # Force ABI-only mode for rpy2 if it is ever installed, avoiding the need
+    # for a system R during the build.
+    RPY2_CFFI_MODE: ABI
+
+sphinx:
+  configuration: docs/conf.py
