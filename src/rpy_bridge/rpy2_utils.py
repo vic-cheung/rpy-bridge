@@ -19,6 +19,7 @@ from pathlib import Path
 import sys
 import subprocess
 
+import math
 import numpy as np
 import pandas as pd
 
@@ -280,6 +281,13 @@ class RFunctionCaller:
             logger.info("R script sourced: {}", self.script_path.name)
             self._script_loaded = True
 
+    def _clean_scalar(self, x):
+        if x is None:
+            return None
+        if isinstance(x, float) and math.isnan(x):
+            return None
+        return x
+
     # -----------------------------------------------------------------
     # Python -> R conversion
     # -----------------------------------------------------------------
@@ -439,21 +447,13 @@ class RFunctionCaller:
 
         # --- Atomic vectors ---
         if isinstance(obj, (StrVector, IntVector, FloatVector, BoolVector)):
-            py_list = []
-            for v in obj:
-                if v in (robjects.NA_Logical, robjects.NA_Integer, robjects.NA_Real):
-                    py_list.append(np.nan)
-                elif v is robjects.NA_Character:
-                    py_list.append(pd.NA)
-                else:
-                    py_list.append(v)
-            py_list = clean_r_missing(py_list, caller=self)
+            py_list = [self._clean_scalar(v) for v in obj]
             if len(py_list) == 1:
                 return py_list[0]
             return py_list
 
         # --- Fallback scalar ---
-        return clean_r_missing(obj, caller=self)
+        return self._clean_scalar(obj)
 
     # -----------------------------------------------------------------
     # Public: ensure R package is available
