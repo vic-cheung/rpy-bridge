@@ -328,6 +328,10 @@ class RFunctionCaller:
             if isinstance(obj, pd.DataFrame):
                 return pandas2ri.py2rpy(obj)
 
+            # Series → vector (preserve name)
+            if isinstance(obj, pd.Series):
+                return self._py2r(obj.tolist())
+
             # Scalars
             if isinstance(obj, (int, float, bool, str)):
                 return obj
@@ -335,39 +339,51 @@ class RFunctionCaller:
             # Lists
             if isinstance(obj, list):
                 if len(obj) == 0:
-                    return FloatVector([])  # Empty vector, default numeric
+                    return FloatVector([])
 
-                # Homogeneous int
-                if all(isinstance(x, int) or x is None or pd.isna(x) for x in obj):
-                    obj_r = [
-                        robjects.NA_Real if x is None or pd.isna(x) else x for x in obj
-                    ]
-                    return FloatVector(obj_r)
+                def is_na(x):
+                    return (
+                        x is None or x is pd.NA or (isinstance(x, float) and pd.isna(x))
+                    )
+
+                # Homogeneous int (not bool)
+                if all(
+                    (isinstance(x, int) and not isinstance(x, bool)) or is_na(x)
+                    for x in obj
+                ):
+                    return FloatVector(
+                        [robjects.NA_Real if is_na(x) else float(x) for x in obj]
+                    )
 
                 # Homogeneous float
-                if all(isinstance(x, float) or x is None or pd.isna(x) for x in obj):
-                    obj_r = [
-                        robjects.NA_Real if x is None or pd.isna(x) else x for x in obj
-                    ]
-                    return FloatVector(obj_r)
+                if all(isinstance(x, float) or is_na(x) for x in obj):
+                    return FloatVector(
+                        [robjects.NA_Real if is_na(x) else x for x in obj]
+                    )
+
+                # Mixed numeric (int + float, not bool)
+                if all(
+                    (isinstance(x, (int, float)) and not isinstance(x, bool))
+                    or is_na(x)
+                    for x in obj
+                ):
+                    return FloatVector(
+                        [robjects.NA_Real if is_na(x) else float(x) for x in obj]
+                    )
 
                 # Homogeneous bool
-                if all(isinstance(x, bool) or x is None or pd.isna(x) for x in obj):
-                    obj_r = [
-                        robjects.NA_Logical if x is None or pd.isna(x) else x
-                        for x in obj
-                    ]
-                    return BoolVector(obj_r)
+                if all(isinstance(x, bool) or is_na(x) for x in obj):
+                    return BoolVector(
+                        [robjects.NA_Logical if is_na(x) else x for x in obj]
+                    )
 
                 # Homogeneous str
-                if all(isinstance(x, str) or x is None or pd.isna(x) for x in obj):
-                    obj_r = [
-                        robjects.NA_Character if x is None or pd.isna(x) else x
-                        for x in obj
-                    ]
-                    return StrVector(obj_r)
+                if all(isinstance(x, str) or is_na(x) for x in obj):
+                    return StrVector(
+                        [robjects.NA_Character if is_na(x) else x for x in obj]
+                    )
 
-                # Mixed / nested → recursively ListVector
+                # True heterogeneous list
                 return ListVector({str(i): self._py2r(x) for i, x in enumerate(obj)})
 
             # Dict → NamedList
@@ -389,6 +405,8 @@ class RFunctionCaller:
         - NULL → None
         """
 
+        from .rpy2_utils import clean_r_missing, postprocess_r_dataframe
+
         r = self._r
         robjects = self.robjects
         NamedList = self.NamedList
@@ -409,24 +427,18 @@ class RFunctionCaller:
         if isinstance(obj, robjects.DataFrame):
             with lc(robjects.default_converter + pandas2ri.converter):
                 df = robjects.conversion.rpy2py(obj)
-            from .rpy2_utils import postprocess_r_dataframe, clean_r_missing
-
             df = postprocess_r_dataframe(df)
             df = clean_r_missing(df, caller=self)
             return df
 
         # --- NamedList / ListVector ---
         if isinstance(obj, (NamedList, ListVector)):
-            from .rpy2_utils import clean_r_missing
-
             py_obj = r_namedlist_to_dict(obj, caller=self)
             py_obj = clean_r_missing(py_obj, caller=self)
             return py_obj
 
         # --- Atomic vectors ---
         if isinstance(obj, (StrVector, IntVector, FloatVector, BoolVector)):
-            from .rpy2_utils import clean_r_missing
-
             py_list = []
             for v in obj:
                 if v in (robjects.NA_Logical, robjects.NA_Integer, robjects.NA_Real):
@@ -501,25 +513,22 @@ def r_namedlist_to_dict(namedlist, caller: RFunctionCaller):
     Uses the caller._r2py method for nested conversions.
     """
     r = _ensure_rpy2()
-    robjects = r["robjects"]
     NamedList = r["NamedList"]
     ListVector = r["ListVector"]
-    StrVector = r["StrVector"]
-    IntVector = r["IntVector"]
-    FloatVector = r["FloatVector"]
-    BoolVector = r["BoolVector"]
-    NULLType = r["NULLType"]
 
     if isinstance(namedlist, (NamedList, ListVector)):
         names = namedlist.names if not callable(namedlist.names) else namedlist.names()
+
+        # --- detect positional list ---
+        if names and all(str(i) == str(name) for i, name in enumerate(names)):
+            return [caller._r2py(v) for v in namedlist]
+
+        # --- otherwise dict ---
         result = {}
         for i, val in enumerate(namedlist):
             key = names[i] if names and i < len(names) else str(i)
             result[str(key)] = caller._r2py(val)
         return result
-
-    if isinstance(namedlist, (StrVector, IntVector, FloatVector, BoolVector)):
-        return list(namedlist)
 
     return caller._r2py(namedlist)
 
