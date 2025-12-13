@@ -10,13 +10,13 @@ from .rpy2_utils import (
     activate_renv,
     align_numeric_dtypes,
     clean_r_dataframe,
+    clean_r_missing,
     compare_r_py_dataframes,
     fix_r_dataframe_types,
     fix_string_nans,
     normalize_dtypes,
     normalize_single_df_dtypes,
     postprocess_r_dataframe,
-    clean_r_missing,
     r_namedlist_to_dict,
 )
 

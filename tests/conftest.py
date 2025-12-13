@@ -1,4 +1,5 @@
 import pytest
+
 from rpy_bridge import RFunctionCaller
 
 
