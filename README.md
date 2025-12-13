@@ -1,9 +1,8 @@
 # rpy-bridge
 
-Utilities for calling R code from Python using `rpy2`. It provides a small
-wrapper that can (optionally) activate an `renv` project, source an R
-script, call functions from that script, and post-process results into
-well-typed pandas `DataFrame` objects.
+Utilities for calling R code from Python. It provides a wrapper that can (optionally)
+activate an `renv` project, source an Rscript, call functions from that script, 
+and recursively post-process results into well-typed pandas `DataFrame` objects.
 
 This project was developed for bilingual teams where some functions are
 authored in R and the primary consumer is a Python-centric developer. It
