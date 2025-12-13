@@ -109,18 +109,31 @@ class RFunctionCaller:
     A utility class to load and execute R functions from a specified R script using rpy2.
     """
 
-    def __init__(self, path_to_renv: Path | None, script_path: Path):
+    def __init__(
+        self,
+        path_to_renv: Path | None = None,
+        script_path: Path | None = None,
+        packages: list[str] | None = None,
+    ):
         """
-        Initialize the RFunctionCaller with the path to the renv environment and the R script.
-        Set path_to_renv to None if no renv is used.
+        Initialize the RFunctionCaller.
+
+        You may provide either:
+        - `script_path`: a Path to an R script to `source()` (existing behavior), or
+        - `packages`: a list of installed R package names to load into the R session
+          so you can call package functions directly (no local script required).
+
+        `path_to_renv` may be provided to activate an `renv` project first.
         """
-        if not script_path.exists():
-            raise FileNotFoundError(f"R script not found: {script_path}")
 
         self.path_to_renv = path_to_renv.resolve() if path_to_renv else None
 
-        self.script_path = script_path.resolve()
-        self.script_dir = self.script_path.parent
+        self.script_path = script_path.resolve() if script_path else None
+        if self.script_path and not self.script_path.exists():
+            raise FileNotFoundError(f"R script not found: {self.script_path}")
+
+        self.script_dir = self.script_path.parent if self.script_path else None
+        self.packages = packages or None
 
         self._load_script()
 
@@ -133,10 +146,29 @@ class RFunctionCaller:
         else:
             logger.info("No renv path provided; using base or current environment.")
 
-        # Set the working directory to the script's directory
-        robjects.r(f'setwd("{self.script_dir.as_posix()}")')
-        robjects.r(f'source("{self.script_path.as_posix()}")')
-        logger.info("R script sourced: {}", self.script_path.name)
+        # Load requested packages into the R session (if any)
+        if self.packages:
+            for pkg in self.packages:
+                try:
+                    robjects.r(f'library("{pkg}")')
+                    logger.info("Loaded R package: {}", pkg)
+                except Exception:
+                    # Try installing then loading
+                    logger.info("Package {} not found; attempting to install.", pkg)
+                    robjects.r(
+                        f'install.packages("{pkg}", repos="https://cloud.r-project.org")'
+                    )
+                    robjects.r(f'library("{pkg}")')
+
+        # If a script was provided, set the working directory to its directory and source it
+        if self.script_path:
+            robjects.r(f'setwd("{self.script_dir.as_posix()}")')
+            robjects.r(f'source("{self.script_path.as_posix()}")')
+            logger.info("R script sourced: {}", self.script_path.name)
+        else:
+            logger.info(
+                "No R script provided; functions must come from loaded packages or the base environment."
+            )
 
     def call(self, function_name: str, *args: object, **kwargs: object) -> object:
         """
@@ -165,7 +197,18 @@ class RFunctionCaller:
             return obj  # Primitive values stay as-is
 
         try:
-            r_func = robjects.globalenv[function_name]
+            # First try a function defined in the global environment (sourced script)
+            try:
+                r_func = robjects.globalenv[function_name]
+            except KeyError:
+                # If not in globalenv, try to resolve as an R symbol/expression.
+                # This allows calling `pkg::fun` or functions from loaded packages.
+                try:
+                    r_func = robjects.r(function_name)
+                except Exception:
+                    raise ValueError(
+                        f"Function '{function_name}' not found in the R environment or loaded packages."
+                    )
 
             with localconverter(robjects.default_converter + pandas2ri.converter):
                 r_args = [robjects.conversion.py2rpy(arg) for arg in args]
@@ -244,7 +287,11 @@ def r_namedlist_to_dict(namedlist: object) -> object:
         # Only iterate if names is not NULL
         if not isinstance(names, NULLType):
             for key, value in zip(names, namedlist):
-                key_str = str(key) if key is not None and not isinstance(key, NULLType) else None
+                key_str = (
+                    str(key)
+                    if key is not None and not isinstance(key, NULLType)
+                    else None
+                )
                 if key_str:
                     result[key_str] = r_namedlist_to_dict(value)
             return result
@@ -364,7 +411,9 @@ def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
             if not values.empty and values.between(10000, 40000).all():
                 try:
                     # "1970-01-01" is the reference date for Unix Epoch
-                    df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(series, unit="D")
+                    df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(
+                        series, unit="D"
+                    )
                 except Exception:
                     pass
 
@@ -404,7 +453,9 @@ def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # -------------------------------------------
 
 
-def normalize_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def normalize_dtypes(
+    df1: pd.DataFrame, df2: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Aligns column dtypes across two DataFrames for accurate comparison.
     - Replaces empty strings with pd.NA.
@@ -420,8 +471,12 @@ def normalize_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame
         dtype1, dtype2 = s1.dtype, s2.dtype
 
         # If one is numeric and the other is object, try coercing both to numeric
-        if (pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_object_dtype(dtype2)) or (
-            pd.api.types.is_object_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2)
+        if (
+            pd.api.types.is_numeric_dtype(dtype1)
+            and pd.api.types.is_object_dtype(dtype2)
+        ) or (
+            pd.api.types.is_object_dtype(dtype1)
+            and pd.api.types.is_numeric_dtype(dtype2)
         ):
             try:
                 df1[col] = pd.to_numeric(s1, errors="coerce")
@@ -431,7 +486,9 @@ def normalize_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame
                 pass  # fallback to next block if coercion fails
 
         # If both are numeric but of different types (e.g., int vs float), unify to float64
-        if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2):
+        if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(
+            dtype2
+        ):
             df1[col] = df1[col].astype("float64")
             df2[col] = df2[col].astype("float64")
             continue
@@ -445,7 +502,9 @@ def normalize_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame
 
 
 # %%
-def align_numeric_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def align_numeric_dtypes(
+    df1: pd.DataFrame, df2: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Ensure aligned numeric dtypes between two DataFrames for accurate comparison.
     Converts between int, float, and numeric-looking strings where appropriate.
@@ -479,7 +538,9 @@ def align_numeric_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataF
 
 
 # %%
-def compare_r_py_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8) -> dict:
+def compare_r_py_dataframes(
+    df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8
+) -> dict:
     """
     Compare a Python DataFrame (df1) with an R DataFrame converted to pandas (df2).
 
@@ -530,7 +591,9 @@ def compare_r_py_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, float_tol: flo
         col_py = df1_aligned[col]
         col_r = df2_aligned[col]
 
-        if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(col_r):
+        if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(
+            col_r
+        ):
             col_py, col_r = col_py.align(col_r)
 
             close = np.isclose(
