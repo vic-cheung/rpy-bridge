@@ -19,20 +19,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import rpy2.robjects as ro
-from rpy2 import robjects
-from rpy2.rinterface_lib.sexp import NULLType
-from rpy2.rlike.container import NamedList
-from rpy2.robjects import pandas2ri
-from rpy2.robjects.conversion import localconverter
-from rpy2.robjects.vectors import (
-    BoolVector,
-    FloatVector,
-    IntVector,
-    ListVector,
-    StrVector,
-)
-from typing import Optional
 
 try:
     from loguru import logger  # type: ignore
@@ -41,6 +27,60 @@ except Exception:
 
     logging.basicConfig()
     logger = logging.getLogger("rpy-bridge")
+
+
+# ---------------------------------------------------------------------
+# Lazy, one-time rpy2 import machinery
+# ---------------------------------------------------------------------
+_RPY2 = None
+
+
+def _require_rpy2():
+    """
+    Lazily import rpy2 and cache symbols.
+
+    This prevents ReadTheDocs and other environments without R installed
+    from failing at import time.
+    """
+    global _RPY2
+    if _RPY2 is not None:
+        return _RPY2
+
+    try:
+        import rpy2.robjects as ro
+        from rpy2 import robjects
+        from rpy2.robjects import pandas2ri
+        from rpy2.robjects.conversion import localconverter
+        from rpy2.robjects.vectors import (
+            BoolVector,
+            FloatVector,
+            IntVector,
+            ListVector,
+            StrVector,
+        )
+        from rpy2.rinterface_lib.sexp import NULLType
+        from rpy2.rlike.container import NamedList
+
+        _RPY2 = {
+            "ro": ro,
+            "robjects": robjects,
+            "pandas2ri": pandas2ri,
+            "localconverter": localconverter,
+            "BoolVector": BoolVector,
+            "FloatVector": FloatVector,
+            "IntVector": IntVector,
+            "ListVector": ListVector,
+            "StrVector": StrVector,
+            "NULLType": NULLType,
+            "NamedList": NamedList,
+        }
+        return _RPY2
+
+    except ImportError as e:
+        raise RuntimeError(
+            "R support requires optional dependency.\n"
+            "Install with: pip install rpy-bridge[r]"
+        ) from e
 
 
 # %%
@@ -53,16 +93,16 @@ def activate_renv(path_to_renv: Path) -> None:
     - Direct path to renv directory (e.g., /path/to/renv)
     - Parent directory containing renv/ folder (e.g., /path/to/repos where renv/ is inside)
     """
+    r = _require_rpy2()
+    robjects = r["robjects"]
 
     path_to_renv = path_to_renv.resolve()
 
     # Determine if path_to_renv is the renv directory itself or its parent
     if path_to_renv.name == "renv" and (path_to_renv / "activate.R").exists():
-        # Path points directly to renv directory
         renv_dir = path_to_renv
         renv_project_dir = path_to_renv.parent
     else:
-        # Path points to parent directory containing renv/
         renv_dir = path_to_renv / "renv"
         renv_project_dir = path_to_renv
 
@@ -89,10 +129,8 @@ def activate_renv(path_to_renv: Path) -> None:
     except Exception:
         print("[Info] renv package not found in R. Attempting to install...")
         robjects.r('install.packages("renv", repos="https://cloud.r-project.org")')
-        # Try loading again after installation
         robjects.r("library(renv)")
 
-    # Load the renv environment using renv::load(path)
     try:
         logger.info("Using R at: {}", robjects.r("R.home()")[0])
         robjects.r(f'renv::load("{renv_project_dir.as_posix()}")')
@@ -117,18 +155,20 @@ class RFunctionCaller:
     ):
         """
         Initialize the RFunctionCaller.
-
-        You may provide either:
-        - `script_path`: a Path to an R script to `source()` (existing behavior), or
-        - `packages`: a list of installed R package names to load into the R session
-          so you can call package functions directly (no local script required).
-
-        `path_to_renv` may be provided to activate an `renv` project first.
         """
+        self._r = _require_rpy2()
+        self.ro = self._r["ro"]
+        self.robjects = self._r["robjects"]
+        self.pandas2ri = self._r["pandas2ri"]
+        self.localconverter = self._r["localconverter"]
+        self.IntVector = self._r["IntVector"]
+        self.FloatVector = self._r["FloatVector"]
+        self.ListVector = self._r["ListVector"]
+        self.NamedList = self._r["NamedList"]
 
         self.path_to_renv = path_to_renv.resolve() if path_to_renv else None
-
         self.script_path = script_path.resolve() if script_path else None
+
         if self.script_path and not self.script_path.exists():
             raise FileNotFoundError(f"R script not found: {self.script_path}")
 
@@ -138,165 +178,25 @@ class RFunctionCaller:
         self._load_script()
 
     def _load_script(self):
-        """
-        Set the R working directory and source the R script.
-        """
         if self.path_to_renv:
             activate_renv(self.path_to_renv)
         else:
             logger.info("No renv path provided; using base or current environment.")
 
-        # Load requested packages into the R session (if any)
         if self.packages:
             for pkg in self.packages:
                 try:
-                    robjects.r(f'library("{pkg}")')
-                    logger.info("Loaded R package: {}", pkg)
+                    self.robjects.r(f'library("{pkg}")')
                 except Exception:
-                    # Try installing then loading
-                    logger.info("Package {} not found; attempting to install.", pkg)
-                    robjects.r(
+                    self.robjects.r(
                         f'install.packages("{pkg}", repos="https://cloud.r-project.org")'
                     )
-                    robjects.r(f'library("{pkg}")')
+                    self.robjects.r(f'library("{pkg}")')
 
-        # If a script was provided, set the working directory to its directory and source it
         if self.script_path:
-            robjects.r(f'setwd("{self.script_dir.as_posix()}")')
-            robjects.r(f'source("{self.script_path.as_posix()}")')
+            self.robjects.r(f'setwd("{self.script_dir.as_posix()}")')
+            self.robjects.r(f'source("{self.script_path.as_posix()}")')
             logger.info("R script sourced: {}", self.script_path.name)
-        else:
-            logger.info(
-                "No R script provided; functions must come from loaded packages or the base environment."
-            )
-
-    def call(self, function_name: str, *args: object, **kwargs: object) -> object:
-        """
-        Call an R function from the sourced script, and recursively convert &
-        post-process the result.
-
-        Handles:
-        - Direct data.frame
-        - NamedList or ListVector
-        - Nested lists with data.frames inside
-        """
-
-        def _recursive_postprocess(obj):
-            # Handle single DataFrame
-            if isinstance(obj, pd.DataFrame):
-                return postprocess_r_dataframe(obj)
-
-            # Handle dictionary (e.g. NamedList converted)
-            elif isinstance(obj, dict):
-                return {k: _recursive_postprocess(v) for k, v in obj.items()}
-
-            # Handle list of items
-            elif isinstance(obj, list):
-                return [_recursive_postprocess(item) for item in obj]
-
-            return obj  # Primitive values stay as-is
-
-        try:
-            # First try a function defined in the global environment (sourced script)
-            try:
-                r_func = robjects.globalenv[function_name]
-            except KeyError:
-                # If not in globalenv, try to resolve as an R symbol/expression.
-                # This allows calling `pkg::fun` or functions from loaded packages.
-                try:
-                    r_func = robjects.r(function_name)
-                except Exception:
-                    raise ValueError(
-                        f"Function '{function_name}' not found in the R environment or loaded packages."
-                    )
-
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                # rpy2 doesn't have a direct converter for numpy.ndarray -> convert to list
-                from numbers import Number
-
-                def _prepare_arg(a):
-                    # Convert numpy arrays to atomic R vectors
-                    if isinstance(a, np.ndarray):
-                        if np.issubdtype(a.dtype, np.integer):
-                            return IntVector(a.tolist())
-                        return FloatVector(a.tolist())
-
-                    # Convert pandas Series to atomic vectors
-                    if isinstance(a, pd.Series):
-                        if pd.api.types.is_integer_dtype(a.dtype):
-                            return IntVector(a.dropna().tolist())
-                        return FloatVector(a.dropna().tolist())
-
-                    # Convert plain Python sequences of numbers to atomic vectors
-                    if (
-                        isinstance(a, (list, tuple))
-                        and a
-                        and all(isinstance(x, Number) for x in a)
-                    ):
-                        if all(isinstance(x, int) for x in a):
-                            return IntVector(list(a))
-                        return FloatVector(list(a))
-
-                    return a
-
-                r_args = [robjects.conversion.py2rpy(_prepare_arg(arg)) for arg in args]
-                r_kwargs = {
-                    k: robjects.conversion.py2rpy(_prepare_arg(v))
-                    for k, v in kwargs.items()
-                }
-                result = r_func(*r_args, **r_kwargs)
-
-            # Step 1: Try direct conversion
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                py_result = robjects.conversion.rpy2py(result)
-
-            # Step 2: If it's still an R container, convert it
-            if isinstance(py_result, (NamedList, ListVector)):
-                py_result = r_namedlist_to_dict(py_result)
-
-            # Step 3: Recursively process any nested frames
-            return replace_r_na(_recursive_postprocess(py_result))
-
-        except KeyError:
-            raise ValueError(f"Function '{function_name}' not found in the R script.")
-        except Exception as e:
-            raise RuntimeError(f"Error calling R function '{function_name}': {e}")
-
-    @classmethod
-    def from_github(
-        cls,
-        repo: str,
-        file_path: str,
-        ref: str = "main",
-        token: Optional[str] = None,
-        cache_dir: Optional[Path] = None,
-        path_to_renv: Optional[Path] = None,
-        trust_remote_code: bool = False,
-        require_token: bool = False,
-    ) -> "RFunctionCaller | Path":
-        """
-        Download an R script from a GitHub repository and construct an RFunctionCaller.
-
-        Args:
-            repo: repository in the form "owner/repo".
-            file_path: path to the R script inside the repo (e.g. "scripts/my.R").
-            ref: branch name, tag or commit SHA. Defaults to "main".
-            token: optional GitHub token for private repos. If None, looks at
-                environment variables `GITHUB_TOKEN` or `GH_TOKEN`.
-            cache_dir: optional directory to cache downloaded files. Defaults to
-                `~/.cache/rpy-bridge`.
-            path_to_renv: optional path to renv or project directory to use.
-            trust_remote_code: MUST be True to execute remote code. If False,
-                the function will only return the local cached path.
-
-        Returns:
-            If `trust_remote_code` is True, returns an `RFunctionCaller` instance
-            ready to call functions from the downloaded script. Otherwise returns
-            the `Path` to the cached script so the caller can inspect it first.
-        """
-        raise NotImplementedError(
-            "RFunctionCaller.from_github was removed. Clone repositories locally and pass a local script_path to RFunctionCaller instead."
-        )
 
 
 # %%
