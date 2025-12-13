@@ -16,17 +16,30 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore", message="Environment variable .* redefined by R")
 
-try:
-    from loguru import logger  # type: ignore
-except ImportError:
-    import logging
 
+if TYPE_CHECKING:
+    import logging as logging_module
+
+    from loguru import Logger as LoguruLogger
+
+    LoggerType = LoggerType = Union[LoguruLogger, logging_module.Logger]
+else:
+    LoggerType = None  # runtime doesn’t need the type object
+
+import logging
+
+try:
+    from loguru import logger as loguru_logger  # type: ignore
+
+    logger = loguru_logger
+except ImportError:
     logging.basicConfig()
     logger = logging.getLogger("rpy-bridge")
 
@@ -149,6 +162,7 @@ def _ensure_rpy2() -> dict:
     global _RPY2
     if _RPY2 is None:
         _RPY2 = _require_rpy2()
+    assert _RPY2 is not None, "_require_rpy2() returned None"
     return _RPY2
 
 
@@ -763,12 +777,12 @@ def compare_r_py_dataframes(
         dict with mismatch diagnostics, preserving original indices in diffs.
     """
 
-    results = {
+    results: dict[str, Any] = {
         "shape_mismatch": False,
         "columns_mismatch": False,
         "index_mismatch": False,
-        "numeric_diffs": {},
-        "non_numeric_diffs": {},
+        "numeric_diffs": {},  # type: dict[str, pd.DataFrame]
+        "non_numeric_diffs": {},  # type: dict[str, pd.DataFrame]
     }
 
     # --- Preprocessing: fix R-specific issues ---
