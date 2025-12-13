@@ -173,12 +173,12 @@ def activate_renv(path_to_renv: Path) -> None:
     renviron_file = project_dir / ".Renviron"
     if renviron_file.is_file():
         os.environ["R_ENVIRON_USER"] = str(renviron_file)
-        logger.info("R_ENVIRON_USER set to: {}", renviron_file)
+        logger.info(f"R_ENVIRON_USER set to: {renviron_file}")
 
     rprofile_file = project_dir / ".Rprofile"
     if rprofile_file.is_file():
         robjects.r(f'source("{rprofile_file.as_posix()}")')
-        logger.info(".Rprofile sourced: {}", rprofile_file)
+        logger.info(f".Rprofile sourced: {rprofile_file}")
 
     try:
         robjects.r("suppressMessages(library(renv))")
@@ -190,7 +190,7 @@ def activate_renv(path_to_renv: Path) -> None:
         robjects.r("library(renv)")
 
     robjects.r(f'renv::load("{project_dir.as_posix()}")')
-    logger.info("renv environment loaded for project: {}", project_dir)
+    logger.info(f"renv environment loaded for project: {project_dir}")
 
 
 # ---------------------------------------------------------------------
@@ -267,7 +267,7 @@ class RFunctionCaller:
                 try:
                     self.robjects.r(f'suppressMessages(library("{pkg}"))')
                 except Exception:
-                    logger.info("Package '{}' not found. Installing...", pkg)
+                    logger.info(f"Package '{pkg}' not found. Installing...")
                     self.robjects.r(
                         f'install.packages("{pkg}", repos="https://cloud.r-project.org")'
                     )
@@ -278,14 +278,33 @@ class RFunctionCaller:
         if self.script_path and not self._script_loaded:
             self.robjects.r(f'setwd("{self.script_dir.as_posix()}")')
             self.robjects.r(f'source("{self.script_path.as_posix()}")')
-            logger.info("R script sourced: {}", self.script_path.name)
+            logger.info(f"R script sourced: {self.script_path.name}")
             self._script_loaded = True
 
     def _clean_scalar(self, x):
+        """
+        Clean R-style missing values to pandas/NumPy equivalents.
+        Called inside _r2py on each vector element; atomic/scalar only.
+        """
+        r = self._r
+        ro = r["robjects"]
+
         if x is None:
             return None
-        if isinstance(x, float) and math.isnan(x):
+
+        if x in (
+            getattr(ro, "NA_Real", None),
+            getattr(ro, "NA_Integer", None),
+            getattr(ro, "NA_Logical", None),
+        ):
             return None
+
+        if x is getattr(ro, "NA_Character", None):
+            return None
+
+        if isinstance(x, float) and np.isnan(x):
+            return None
+
         return x
 
     # -----------------------------------------------------------------
@@ -294,12 +313,7 @@ class RFunctionCaller:
     def _py2r(self, obj):
         """
         Convert Python objects to R objects robustly.
-        Handles:
-        - Scalars (int, float, bool, str)
-        - None / pd.NA → R NA
-        - Lists (homogeneous or mixed)
-        - Dicts → NamedList
-        - pandas DataFrames → R data.frame
+        Handles scalars, None/pd.NA, lists, dicts, and pandas DataFrames.
         """
         self._ensure_r_loaded()
         robjects = self.robjects
@@ -310,7 +324,6 @@ class RFunctionCaller:
         StrVector = self.StrVector
         ListVector = self.ListVector
         localconverter = self.localconverter
-
         import pandas as pd
         import rpy2.robjects.vectors as rvec
 
@@ -336,7 +349,7 @@ class RFunctionCaller:
             if isinstance(obj, pd.DataFrame):
                 return pandas2ri.py2rpy(obj)
 
-            # Series → vector (preserve name)
+            # Series → vector
             if isinstance(obj, pd.Series):
                 return self._py2r(obj.tolist())
 
@@ -348,31 +361,19 @@ class RFunctionCaller:
             if isinstance(obj, list):
                 if len(obj) == 0:
                     return FloatVector([])
+                elif all(isinstance(x, (int, float)) or x is None for x in obj):
+                    return FloatVector(
+                        [robjects.NA_Real if x is None else float(x) for x in obj]
+                    )
 
                 def is_na(x):
                     return (
                         x is None or x is pd.NA or (isinstance(x, float) and pd.isna(x))
                     )
 
-                # Homogeneous int (not bool)
+                # Homogeneous numeric
                 if all(
-                    (isinstance(x, int) and not isinstance(x, bool)) or is_na(x)
-                    for x in obj
-                ):
-                    return FloatVector(
-                        [robjects.NA_Real if is_na(x) else float(x) for x in obj]
-                    )
-
-                # Homogeneous float
-                if all(isinstance(x, float) or is_na(x) for x in obj):
-                    return FloatVector(
-                        [robjects.NA_Real if is_na(x) else x for x in obj]
-                    )
-
-                # Mixed numeric (int + float, not bool)
-                if all(
-                    (isinstance(x, (int, float)) and not isinstance(x, bool))
-                    or is_na(x)
+                    isinstance(x, (int, float)) and not isinstance(x, bool) or is_na(x)
                     for x in obj
                 ):
                     return FloatVector(
@@ -391,8 +392,8 @@ class RFunctionCaller:
                         [robjects.NA_Character if is_na(x) else x for x in obj]
                     )
 
-                # True heterogeneous list
-                return ListVector({str(i): self._py2r(x) for i, x in enumerate(obj)})
+                # Mixed or nested list → ListVector with positional keys
+                return ListVector({str(i): self._py2r(v) for i, v in enumerate(obj)})
 
             # Dict → NamedList
             if isinstance(obj, dict):
@@ -403,18 +404,11 @@ class RFunctionCaller:
     # -----------------------------------------------------------------
     # R -> Python conversion
     # -----------------------------------------------------------------
-    def _r2py(self, obj):
+    def _r2py(self, obj, top_level=True):
         """
-        Convert R objects to Python objects robustly, cleaning NA values throughout.
-        Handles:
-        - DataFrame → pandas DataFrame, post-processed
-        - NamedList/ListVector → dict with recursive NA handling
-        - Atomic vectors → list or scalar with NA conversion
-        - NULL → None
+        Convert R objects to Python objects robustly.
+        Handles DataFrames, NamedList/ListVector, atomic vectors, and NULL.
         """
-
-        from .rpy2_utils import clean_r_missing, postprocess_r_dataframe
-
         r = self._r
         robjects = self.robjects
         NamedList = self.NamedList
@@ -427,11 +421,9 @@ class RFunctionCaller:
         lc = self.localconverter
         pandas2ri = self.pandas2ri
 
-        # --- NULL → None ---
         if isinstance(obj, NULLType):
             return None
 
-        # --- DataFrame ---
         if isinstance(obj, robjects.DataFrame):
             with lc(robjects.default_converter + pandas2ri.converter):
                 df = robjects.conversion.rpy2py(obj)
@@ -439,20 +431,19 @@ class RFunctionCaller:
             df = clean_r_missing(df, caller=self)
             return df
 
-        # --- NamedList / ListVector ---
         if isinstance(obj, (NamedList, ListVector)):
-            py_obj = r_namedlist_to_dict(obj, caller=self)
-            py_obj = clean_r_missing(py_obj, caller=self)
+            py_obj = r_namedlist_to_dict(obj, caller=self, top_level=top_level)
+            # Auto-unpack single-element lists only at top-level
+            if isinstance(py_obj, list) and len(py_obj) == 1 and top_level:
+                return py_obj[0]
             return py_obj
 
-        # --- Atomic vectors ---
         if isinstance(obj, (StrVector, IntVector, FloatVector, BoolVector)):
             py_list = [self._clean_scalar(v) for v in obj]
-            if len(py_list) == 1:
+            if len(py_list) == 1 and top_level:
                 return py_list[0]
             return py_list
 
-        # --- Fallback scalar ---
         return self._clean_scalar(obj)
 
     # -----------------------------------------------------------------
@@ -505,9 +496,7 @@ class RFunctionCaller:
 # ------------------------------
 # Utility functions for R ↔ Python
 # ------------------------------
-
-
-def r_namedlist_to_dict(namedlist, caller: RFunctionCaller):
+def r_namedlist_to_dict(namedlist, caller: RFunctionCaller, top_level=False):
     """
     Recursively convert an R NamedList or ListVector to a Python dictionary.
     Uses the caller._r2py method for nested conversions.
@@ -519,18 +508,25 @@ def r_namedlist_to_dict(namedlist, caller: RFunctionCaller):
     if isinstance(namedlist, (NamedList, ListVector)):
         names = namedlist.names if not callable(namedlist.names) else namedlist.names()
 
-        # --- detect positional list ---
+        # Detect positional (unnamed) list
         if names and all(str(i) == str(name) for i, name in enumerate(names)):
-            return [caller._r2py(v) for v in namedlist]
+            out = []
+            for v in namedlist:
+                # Nested elements are never top-level
+                val = caller._r2py(v, top_level=False)
+                out.append(val)
+            return out
 
-        # --- otherwise dict ---
+        # Otherwise dict
         result = {}
         for i, val in enumerate(namedlist):
             key = names[i] if names and i < len(names) else str(i)
-            result[str(key)] = caller._r2py(val)
+            v_py = caller._r2py(val, top_level=False)  # nested elements
+            result[str(key)] = v_py
         return result
 
-    return caller._r2py(namedlist)
+    # Fallback: scalar/vector at the very top
+    return caller._r2py(namedlist, top_level=top_level)
 
 
 def clean_r_dataframe(r_df: pd.DataFrame) -> pd.DataFrame:
@@ -621,6 +617,7 @@ def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 def clean_r_missing(obj, caller: RFunctionCaller):
     """
+    Post-process R return objects for downstream Python use.
     Recursively convert R-style missing values to pandas/NumPy:
     - NA_integer_, NA_real_, NA_logical_ → np.nan
     - NA_character_ → pd.NA
