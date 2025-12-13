@@ -10,6 +10,7 @@ Ensure compatibility with your R project's renv setup (or other virtual env/base
 # ruff: noqa: E402
 # %%
 # Import libraries
+import importlib.util
 import os
 import warnings
 
@@ -35,41 +36,47 @@ except Exception:
 # ---------------------------------------------------------------------
 # R detection and rpy2 installation
 # ---------------------------------------------------------------------
-def ensure_rpy2_installed(r_home: str):
-    os.environ["R_HOME"] = r_home
-    try:
-        import rpy2  # noqa: F401
-    except ImportError:
-        logger.info(
-            f"[Info] rpy2 not installed or incompatible with R_HOME={r_home}. Installing..."
+def ensure_rpy2_available() -> None:
+    """
+    Ensure rpy2 is importable.
+    Do NOT attempt to install dynamically; fail with clear instructions instead.
+    """
+    if importlib.util.find_spec("rpy2") is None:
+        raise RuntimeError(
+            "\n[Error] rpy2 is not installed. Please install it in your Python environment:\n"
+            "  pip install rpy2\n\n"
+            "Make sure your Python environment can access your system R installation.\n"
+            "On macOS with Homebrew: brew install r\n"
+            "On Linux: apt install r-base  (Debian/Ubuntu) or yum install R (CentOS/RHEL)\n"
+            "On Windows: install R from https://cran.r-project.org\n"
         )
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--force-reinstall", "rpy2"]
-        )
-        import rpy2  # noqa: F401
 
 
-def find_r_home():
+def find_r_home() -> str | None:
+    """Detect system R installation."""
+    import subprocess, os, sys
+
     try:
         r_home = subprocess.check_output(
             ["R", "--vanilla", "--slave", "-e", "cat(R.home())"],
             stderr=subprocess.PIPE,
             text=True,
         ).strip()
-        if r_home.endswith(">"):
+        if r_home.endswith(">"):  # sometimes R console prints >
             r_home = r_home[:-1].strip()
         return r_home
     except FileNotFoundError:
+        # fallback paths (Linux, macOS Homebrew, Windows)
         possible_paths = [
             "/usr/lib/R",
             "/usr/local/lib/R",
-            "/opt/homebrew/Cellar/r/4.5.2/lib/R",  # Homebrew macOS
+            "/opt/homebrew/Cellar/r/4.5.2/lib/R",  # macOS Homebrew
             "C:\\Program Files\\R\\R-4.5.2",  # Windows
         ]
         for p in possible_paths:
             if os.path.exists(p):
                 return p
-        return None
+    return None
 
 
 R_HOME = find_r_home()
@@ -78,7 +85,7 @@ if not R_HOME:
 
 logger.info(f"R_HOME = {R_HOME}")
 os.environ["R_HOME"] = R_HOME
-ensure_rpy2_installed(R_HOME)
+ensure_rpy2_available()
 
 # macOS dynamic library path
 if sys.platform == "darwin":
@@ -470,13 +477,25 @@ class RFunctionCaller:
         self._ensure_r_loaded()
 
         # --- Find the function ---
+        func = None
         try:
             func = self.robjects.globalenv[func_name]  # script-defined
         except KeyError:
             try:
                 func = self.robjects.r[func_name]  # base or package function
             except KeyError:
-                raise ValueError(f"R function '{func_name}' not found.")
+                # --- Added: handle namespaced functions like stats::median ---
+                if "::" in func_name:
+                    pkg, fname = func_name.split("::", 1)
+                    try:
+                        func = self.robjects.r(f"{pkg}::{fname}")
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Failed to load R function '{func_name}' via namespace: {e}"
+                        ) from e
+
+                if func is None:
+                    raise ValueError(f"R function '{func_name}' not found.")
 
         # --- Convert Python args to R ---
         r_args = [self._py2r(a) for a in args]
