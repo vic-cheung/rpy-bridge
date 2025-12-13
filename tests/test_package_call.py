@@ -1,18 +1,9 @@
 import pytest
 
-from rpy_bridge import RFunctionCaller
 
-
-def test_call_stats_functions():
-    """Smoke test: load `stats` and call `rnorm` and `median`.
-
-    This test will be skipped if R or rpy2 are not available in the test
-    environment.
-    """
-    try:
-        caller = RFunctionCaller(path_to_renv=None, packages=["stats"])
-    except Exception as e:
-        pytest.skip(f"Skipping because R/rpy2 not available: {e}")
+# caller fixture is injected from conftest.py
+def test_call_stats_functions(caller):
+    """Smoke test: load `stats` and call `rnorm` and `median`."""
 
     samples = caller.call("rnorm", 10, mean=5)
     assert hasattr(samples, "__len__")

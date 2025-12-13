@@ -1,11 +1,10 @@
 # %%
 from pathlib import Path
 import pandas as pd
-from rpy_bridge import RFunctionCaller
 
 
-# %%
-def test_py2r_edge_cases(caller: RFunctionCaller):
+# The caller fixture is now injected by pytest
+def test_py2r_edge_cases(caller):
     test_cases = {
         "simple_int_list": [1, 2, 3],
         "simple_float_list": [1.0, 2.5, 3.7],
@@ -26,7 +25,7 @@ def test_py2r_edge_cases(caller: RFunctionCaller):
         "scalar_str": "hello",
     }
 
-    caller._ensure_r_loaded()  # Make sure R is loaded
+    caller._ensure_r_loaded()  # Ensure R is loaded
 
     print("\n--- Testing _py2r edge cases ---")
     for name, value in test_cases.items():
@@ -34,7 +33,6 @@ def test_py2r_edge_cases(caller: RFunctionCaller):
             r_obj = caller._py2r(value)
             print(f"\n--- Test case: {name} ---")
             print("R object type:", type(r_obj))
-            # Handle R vectors or ListVector
             if hasattr(r_obj, "__len__") and not isinstance(
                 r_obj, (int, float, bool, str)
             ):
@@ -46,11 +44,3 @@ def test_py2r_edge_cases(caller: RFunctionCaller):
                 print("R object:", r_obj)
         except Exception as e:
             print(f"Error in {name}: {e}")
-
-
-# Example usage
-if __name__ == "__main__":
-    caller = RFunctionCaller()
-    test_py2r_edge_cases(caller)
-
-# %%

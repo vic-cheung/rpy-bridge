@@ -1,11 +1,10 @@
 # %%
 import pandas as pd
 import numpy as np
-from rpy_bridge import RFunctionCaller
 
 
-# %%
-def test_py2r_r2py_roundtrip(caller: RFunctionCaller):
+# The caller fixture is now injected by pytest
+def test_py2r_r2py_roundtrip(caller):
     """
     Test round-trip conversion: Python -> R -> Python
     Handles edge cases including scalars, lists, nested structures, dicts, and NA values.
@@ -34,13 +33,9 @@ def test_py2r_r2py_roundtrip(caller: RFunctionCaller):
     for name, py_obj in test_cases.items():
         print(f"\n--- Test case: {name} ---")
         try:
-            # Python -> R
             r_obj = caller._py2r(py_obj)
-
-            # R -> Python
             py_roundtrip = caller._r2py(r_obj)
 
-            # Normalize NA values for comparison
             def normalize(obj):
                 if isinstance(obj, pd.Series):
                     return obj.replace({pd.NA: None}).tolist()
@@ -63,14 +58,3 @@ def test_py2r_r2py_roundtrip(caller: RFunctionCaller):
 
         except Exception as e:
             print("Error during round-trip:", e)
-
-
-# Example usage:
-if __name__ == "__main__":
-    from rpy_bridge import RFunctionCaller
-
-    caller = RFunctionCaller()
-    caller._ensure_r_loaded()  # Ensure R is loaded
-    test_py2r_r2py_roundtrip(caller)
-
-# %%
