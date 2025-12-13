@@ -211,8 +211,39 @@ class RFunctionCaller:
                     )
 
             with localconverter(robjects.default_converter + pandas2ri.converter):
-                r_args = [robjects.conversion.py2rpy(arg) for arg in args]
-                r_kwargs = {k: robjects.conversion.py2rpy(v) for k, v in kwargs.items()}
+                # rpy2 doesn't have a direct converter for numpy.ndarray -> convert to list
+                from numbers import Number
+
+                def _prepare_arg(a):
+                    # Convert numpy arrays to atomic R vectors
+                    if isinstance(a, np.ndarray):
+                        if np.issubdtype(a.dtype, np.integer):
+                            return IntVector(a.tolist())
+                        return FloatVector(a.tolist())
+
+                    # Convert pandas Series to atomic vectors
+                    if isinstance(a, pd.Series):
+                        if pd.api.types.is_integer_dtype(a.dtype):
+                            return IntVector(a.dropna().tolist())
+                        return FloatVector(a.dropna().tolist())
+
+                    # Convert plain Python sequences of numbers to atomic vectors
+                    if (
+                        isinstance(a, (list, tuple))
+                        and a
+                        and all(isinstance(x, Number) for x in a)
+                    ):
+                        if all(isinstance(x, int) for x in a):
+                            return IntVector(list(a))
+                        return FloatVector(list(a))
+
+                    return a
+
+                r_args = [robjects.conversion.py2rpy(_prepare_arg(arg)) for arg in args]
+                r_kwargs = {
+                    k: robjects.conversion.py2rpy(_prepare_arg(v))
+                    for k, v in kwargs.items()
+                }
                 result = r_func(*r_args, **r_kwargs)
 
             # Step 1: Try direct conversion
