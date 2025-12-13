@@ -90,6 +90,21 @@ result = caller.call("some_function", 42, named_arg="value")
 print(type(result))
 ```
 
+Call installed R packages (no local script)
+
+```python
+from rpy_bridge import RFunctionCaller
+
+# Load the `stats` package into the R session and call `rnorm`
+caller = RFunctionCaller(path_to_renv=None, packages=["stats"])
+samples = caller.call("rnorm", 5, mean=10)
+print(type(samples))  # typically a numpy.ndarray
+
+# You can also call functions using explicit namespace syntax
+median_val = caller.call("stats::median", samples)
+print(median_val)
+```
+
 Notes:
 
 `path_to_renv` may be either the project directory (containing `renv/`) or
