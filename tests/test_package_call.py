@@ -1,4 +1,3 @@
-import pytest
 
 
 # caller fixture is injected from conftest.py

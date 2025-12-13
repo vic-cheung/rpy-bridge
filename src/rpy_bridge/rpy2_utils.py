@@ -12,21 +12,19 @@ Ensure compatibility with your R project's renv setup (or other virtual env/base
 # Import libraries
 import importlib.util
 import os
-import warnings
-
-warnings.filterwarnings("ignore", message="Environment variable .* redefined by R")
-
-from pathlib import Path
-import sys
 import subprocess
+import sys
+import warnings
+from pathlib import Path
 
-import math
 import numpy as np
 import pandas as pd
 
+warnings.filterwarnings("ignore", message="Environment variable .* redefined by R")
+
 try:
     from loguru import logger  # type: ignore
-except Exception:
+except ImportError:
     import logging
 
     logging.basicConfig()
@@ -54,8 +52,6 @@ def ensure_rpy2_available() -> None:
 
 def find_r_home() -> str | None:
     """Detect system R installation."""
-    import subprocess, os, sys
-
     try:
         r_home = subprocess.check_output(
             ["R", "--vanilla", "--slave", "-e", "cat(R.home())"],
@@ -325,7 +321,6 @@ class RFunctionCaller:
         self._ensure_r_loaded()
         robjects = self.robjects
         pandas2ri = self.pandas2ri
-        IntVector = self.IntVector
         FloatVector = self.FloatVector
         BoolVector = self.BoolVector
         StrVector = self.StrVector
