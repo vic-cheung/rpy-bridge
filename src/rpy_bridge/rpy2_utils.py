@@ -29,7 +29,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Iterable, Union
 
 import numpy as np
 import pandas as pd
@@ -56,6 +56,24 @@ try:
 except ImportError:
     logging.basicConfig()
     logger = logging.getLogger("rpy-bridge")
+
+
+# ---------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------
+def _normalize_scripts(
+    scripts: Union[str, Path, Iterable[Union[str, Path]], None],
+) -> list[Path]:
+    if scripts is None:
+        return []
+    if isinstance(scripts, (str, Path)):
+        return [Path(scripts).resolve()]
+    try:
+        return [Path(s).resolve() for s in scripts]
+    except TypeError:
+        raise TypeError(
+            f"Invalid type for 'scripts': {type(scripts)}. Must be str, Path, or list/iterable thereof."
+        )
 
 
 # ---------------------------------------------------------------------
@@ -248,6 +266,12 @@ class NamespaceWrapper:
             return self._env[func_name]
         raise AttributeError(f"Function '{func_name}' not found in R namespace")
 
+    def list_functions(self):
+        """
+        Return a list of callable functions in this namespace.
+        """
+        return [k for k, v in self._env.items() if callable(v)]
+
 
 # ---------------------------------------------------------------------
 # RFunctionCaller
@@ -280,6 +304,7 @@ class RFunctionCaller:
         packages: str | list[str] | None = None,
         **kwargs,  # catch unexpected keywords
     ):
+        self.scripts = _normalize_scripts(scripts)
         # --- Handle deprecated 'script_path' ---
         if "script_path" in kwargs:
             script_path_value = kwargs.pop("script_path")
@@ -453,6 +478,92 @@ class RFunctionCaller:
             return None
 
         return x
+
+    def list_namespaces(self) -> list[str]:
+        """
+        Return all loaded R script namespaces.
+        """
+        self._ensure_r_loaded()
+        return list(self._namespaces.keys())
+
+    def list_namespace_functions(self, namespace: str) -> list[str]:
+        """
+        Return all callable functions in a specific namespace.
+        """
+        self._ensure_r_loaded()
+        if namespace not in self._namespaces:
+            raise ValueError(f"Namespace '{namespace}' not found")
+        return [k for k, v in self._namespaces[namespace].items() if callable(v)]
+
+    def _get_package_functions(self, pkg: str) -> list[str]:
+        """
+        Return a list of callable functions from a loaded R package.
+        """
+        r = self.robjects.r
+        try:
+            all_objs = list(r[f'ls("package:{pkg}")'])
+            funcs = [
+                name
+                for name in all_objs
+                if r(f'is.function(get("{name}", envir=asNamespace("{pkg}")))')[0]
+            ]
+            return funcs
+        except Exception:
+            logger.warning(f"Failed to list functions for package '{pkg}'")
+            return []
+
+    def list_all_functions(
+        self, include_packages: bool = False
+    ) -> dict[str, list[str]]:
+        """
+        Return all callable R functions grouped by script namespace and package.
+        """
+        self._ensure_r_loaded()
+        all_funcs = {}
+
+        # --- Script namespaces ---
+        for ns_name, ns_env in self._namespaces.items():
+            funcs = [name for name, val in ns_env.items() if callable(val)]
+            all_funcs[ns_name] = funcs
+
+        # --- Loaded R packages ---
+        if include_packages:
+            r = self.robjects.r
+            try:
+                pkgs = r("loadedNamespaces()")
+                for pkg in pkgs:
+                    funcs = self._get_package_functions(pkg)
+                    if not funcs:
+                        # Add a placeholder note
+                        funcs = [
+                            "[See official documentation for functions, datasets, and objects]"
+                        ]
+                    all_funcs[pkg] = funcs
+            except Exception:
+                pass
+
+        return all_funcs
+
+    def print_function_tree(
+        self, include_packages: bool = False, max_display: int = 10
+    ):
+        """
+        Pretty-print all callable R functions in a tree-like structure.
+
+        Args:
+            include_packages: Include functions from loaded R packages.
+            max_display: Maximum functions to show per namespace/package.
+        """
+        all_funcs = self.list_all_functions(include_packages=include_packages)
+
+        for ns_name, funcs in all_funcs.items():
+            if not funcs:
+                continue
+            print(f"{ns_name}/")
+            for f in sorted(funcs)[:max_display]:
+                print(f"  {f}")
+            if len(funcs) > max_display:
+                print("  ...")
 
     # -----------------------------------------------------------------
     # Python -> R conversion
