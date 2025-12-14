@@ -29,7 +29,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Union
+from typing import TYPE_CHECKING, Any, Iterable
 
 import numpy as np
 import pandas as pd
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from loguru import Logger as LoguruLogger
 
-    LoggerType = Union[LoguruLogger, logging_module.Logger]
+    LoggerType = LoguruLogger | logging_module.Logger
 
 else:
     LoggerType = None  # runtime doesn’t need the type object
@@ -85,7 +85,7 @@ def _log_r_call(func_name: str, source_info: str):
 # Path resolution
 # ---------------------------------------------------------------------
 def _normalize_scripts(
-    scripts: Union[str, Path, Iterable[Union[str, Path]], None],
+    scripts: str | Path | Iterable[str | Path] | None,
 ) -> list[Path]:
     if scripts is None:
         return []
@@ -353,11 +353,20 @@ class RFunctionCaller:
 
     def __init__(
         self,
-        path_to_renv: Path | None = None,
+        path_to_renv: str | Path | None = None,
         scripts: str | Path | list[str | Path] | None = None,
         packages: str | list[str] | None = None,
         **kwargs,  # catch unexpected keywords
     ):
+
+        # Handle path_to_renv safely
+        if path_to_renv is not None:
+            if not isinstance(path_to_renv, Path):
+                path_to_renv = Path(path_to_renv)
+            self.path_to_renv = path_to_renv.resolve()
+        else:
+            self.path_to_renv = None
+
         # --- Handle deprecated 'script_path' ---
         if "script_path" in kwargs:
             script_path_value = kwargs.pop("script_path")
