@@ -28,13 +28,17 @@ from rpy_bridge import RFunctionCaller
 
 # %%
 def run_local():
-    script = Path("./toy_funcs.R")
-    print("Local script exists:", script.exists())
-
+    # you can specify a directory that directly has .R scripts or put in the path to .R
+    scripts_dir = Path(".")
+    script_path = Path("./functions_in_another_dir/toy_funcs_more.R")
     # Initialize with dplyr in packages so it's auto-installed/loaded
-    caller = RFunctionCaller(path_to_renv=None, script_path=script, packages=["dplyr"])
+    caller = RFunctionCaller(
+        path_to_renv=None,
+        scripts=[scripts_dir, script_path],
+        packages=["dplyr"],
+    )
 
-    # --- Call functions from your script ---
+    # --- Call functions from toy_funcs.R ---
     print("Calling add_and_scale(2,3):", caller.call("add_and_scale", 2, 3))
     print(
         "Calling add_and_scale(2,3, scale=10):",
@@ -43,6 +47,14 @@ def run_local():
 
     df = caller.call("multiply_table", 2, 5, times=4)
     print("multiply_table result:\n", df)
+
+    # --- Call functions from toy_funcs_more.R ---
+    print(
+        "seq_vector(start=1,end=10,step=2,reverse=True):",
+        caller.call("seq_vector", start=1, end=10, step=2, reverse=True),
+    )
+    print("square_table(n=5):\n", caller.call("square_table", n=5))
+    print("make_named_list():", caller.call("make_named_list"))
 
     # --- Base R functions ---
     print("\nBase R: sum(c(1,2,3,4,5)) →", caller.call("sum", [1, 2, 3, 4, 5]))
