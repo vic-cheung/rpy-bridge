@@ -55,14 +55,16 @@ It enables Python developers to call R functions, scripts, and packages safely w
 
 **From PyPI:**
 
+Install rpy-bridge with rpy2 for full R support
+
 ```bash
-python3 -m pip install rpy-bridge
+python3 -m pip install rpy-bridge rpy2
 ```
 
 or using `uv`:
 
 ```bash
-uv add rpy-bridge
+uv add rpy-bridge rpy2
 ```
 
 **During development (editable install):**

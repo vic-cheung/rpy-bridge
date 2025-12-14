@@ -22,13 +22,13 @@ Installation
 
 .. code-block:: bash
 
-    python3 -m pip install rpy-bridge[r]
+    python3 -m pip install rpy-bridge rpy2
 
 **Using UV package manager:**
 
 .. code-block:: bash
 
-    uv add rpy-bridge
+    uv add rpy-bridge rpy2
 
 
 ---
@@ -48,7 +48,7 @@ RFunctionCaller
 ===============
 
 .. py:class:: RFunctionCaller(path_to_renv: str | Path | None = None, scripts: str | Path | list[str | Path] | None = None, packages: str | list[str] | None = None)
-    
+
    Provides a Python interface to R scripts, functions, and environments.
 
    **Args:**
