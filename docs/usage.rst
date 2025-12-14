@@ -13,8 +13,8 @@ If you have a local R script, source it and call its functions:
     from pathlib import Path
     from rpy_bridge import RFunctionCaller
 
-    script = Path("./scripts/my_funcs.R")
-    caller = RFunctionCaller(path_to_renv=None, script_path=script)
+    script_path = Path("./scripts/my_funcs.R")
+    caller = RFunctionCaller(path_to_renv=None, script=script_path)
     result = caller.call("my_function", 1, named_arg="x")
 
 Call installed R packages

@@ -9,5 +9,5 @@ Usage example (local script):
 
     # Use a local script path (clone or download remote scripts yourself)
     script_path = "/path/to/cloned/repo/scripts/my_script.R"
-    caller = RFunctionCaller(path_to_renv=None, script_path=script_path)
+    caller = RFunctionCaller(path_to_renv=None, script=script_path)
     result = caller.call("my_func")

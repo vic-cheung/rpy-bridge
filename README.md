@@ -93,7 +93,7 @@ from rpy_bridge import RFunctionCaller
 
 caller = RFunctionCaller(
     path_to_renv=Path("/path/to/project"),
-    script_path=Path("/path/to/script.R"),
+    script=Path("/path/to/script.R"),
 )
 
 summary_df = caller.call("summarize_cohort", cohort_df)
