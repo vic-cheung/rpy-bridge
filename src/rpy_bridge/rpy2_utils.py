@@ -1,10 +1,23 @@
 """
-Wrapper for calling R functions from Python using rpy2.
+R–Python Integration Utility
+
+Provides tools to load R scripts, activate renv environments, and call R functions
+directly from Python, with automatic conversion between R and Python data types.
 
 ----------
-** R must be installed and accessible in your environment **
-Ensure compatibility with your R project's renv setup (or other virtual env/base env if that's what you're using).
+Requirements
 ----------
+- R must be installed and accessible in your system environment.
+- Ensure compatibility with your R project's renv setup (or any other R environment you use).
+
+Features
+----------
+- Lazy loading of rpy2 and R runtime.
+- Activation of renv environments for isolated R project dependencies.
+- Support for sourcing individual R scripts or directories of scripts.
+- Namespace-based access to R functions.
+- Automatic conversion between R vectors, data frames, and Python types (pandas, lists, scalars).
+- Utilities for cleaning and aligning data frames between R and Python.
 """
 
 # ruff: noqa: E402
@@ -29,7 +42,8 @@ if TYPE_CHECKING:
 
     from loguru import Logger as LoguruLogger
 
-    LoggerType = LoggerType = Union[LoguruLogger, logging_module.Logger]
+    LoggerType = Union[LoguruLogger, logging_module.Logger]
+
 else:
     LoggerType = None  # runtime doesn’t need the type object
 
@@ -64,7 +78,9 @@ def ensure_rpy2_available() -> None:
 
 
 def find_r_home() -> str | None:
-    """Detect system R installation."""
+    """
+    Detect system R installation.
+    """
     try:
         r_home = subprocess.check_output(
             ["R", "--vanilla", "--slave", "-e", "cat(R.home())"],
@@ -88,9 +104,13 @@ def find_r_home() -> str | None:
     return None
 
 
-R_HOME = find_r_home()
-if not R_HOME:
-    raise RuntimeError("R not found. Please install R or add it to PATH.")
+if "R_HOME" not in os.environ:
+    R_HOME = find_r_home()
+    if not R_HOME:
+        raise RuntimeError("R not found. Please install R or add it to PATH.")
+    os.environ["R_HOME"] = R_HOME
+else:
+    R_HOME = os.environ["R_HOME"]
 
 logger.info(f"R_HOME = {R_HOME}")
 os.environ["R_HOME"] = R_HOME
@@ -107,7 +127,9 @@ if sys.platform == "darwin":
 elif sys.platform.startswith("linux"):
     lib_path = os.path.join(R_HOME, "lib")
     ld_path = os.environ.get("LD_LIBRARY_PATH", "")
-    os.environ["LD_LIBRARY_PATH"] = f"{lib_path}:{ld_path}"
+    if lib_path not in ld_path.split(":"):
+        os.environ["LD_LIBRARY_PATH"] = f"{lib_path}:{ld_path}"
+
 
 # ---------------------------------------------------------------------
 # Lazy rpy2 import machinery
@@ -211,28 +233,94 @@ def activate_renv(path_to_renv: Path) -> None:
 
 
 # ---------------------------------------------------------------------
+# NamespaceWrapper
+# ---------------------------------------------------------------------
+class NamespaceWrapper:
+    """
+    Wraps an R script namespace for Python attribute access.
+    """
+
+    def __init__(self, env):
+        self._env = env
+
+    def __getattr__(self, func_name):
+        if func_name in self._env:
+            return self._env[func_name]
+        raise AttributeError(f"Function '{func_name}' not found in R namespace")
+
+
+# ---------------------------------------------------------------------
 # RFunctionCaller
 # ---------------------------------------------------------------------
 class RFunctionCaller:
     """
-    Utility to load and call R functions from a script, lazily loading rpy2 and activating renv.
+    Utility to load and call R functions from scripts, lazily loading rpy2 and activating renv.
 
     Supports:
-    - Scripts with custom functions
+    - Single or multiple R scripts
+    - R script directories (sources all `.R` files inside)
     - Base R functions
-    - Functions in installed packages
-    - Automatic conversion of Python types (lists, dicts, scalars, pandas DataFrames) to R objects
+    - Functions in loaded packages
+    - Automatic conversion of Python types to R objects
+
+    Args:
+        scripts:
+            Path or list of Paths.
+            Each path may be:
+            - an R script (.R file)
+            - a directory containing R scripts (all *.R files are sourced)
+            - scripts in subdirectories are not automatically sourced
+
     """
 
     def __init__(
         self,
         path_to_renv: Path | None = None,
-        script_path: Path | None = None,
-        packages: list[str] | None = None,
+        scripts: Path | list[Path] | None = None,
+        packages: str | list[str] | None = None,
+        **kwargs,  # catch unexpected keywords
     ):
+        # --- Handle deprecated 'script_path' ---
+        if "script_path" in kwargs:
+            script_path_value = kwargs.pop("script_path")
+            warnings.warn(
+                "'script_path' argument is deprecated. "
+                "Please use 'scripts' instead (accepts a Path or list of Paths).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if scripts is None:
+                scripts = script_path_value
+            else:
+                # Both provided → prioritize scripts and ignore script_path
+                logger.warning(
+                    "'script_path' ignored because 'scripts' argument is also provided."
+                )
+
+        # Raise error if other unexpected kwargs remain
+        if kwargs:
+            raise TypeError(
+                f"RFunctionCaller.__init__() received unexpected keyword arguments: {list(kwargs.keys())}"
+            )
+
         self.path_to_renv = path_to_renv.resolve() if path_to_renv else None
-        self.script_path = script_path.resolve() if script_path else None
-        self.packages = packages or None
+        self._namespaces: dict[str, Any] = {}
+
+        # Normalize scripts to a list
+        if scripts is None:
+            self.scripts: list[Path] = []
+        elif isinstance(scripts, Path):
+            self.scripts = [scripts.resolve()]
+        else:
+            self.scripts = [s.resolve() for s in scripts]
+
+        # Normalize packages to a list
+        if packages is None:
+            self.packages: list[str] = []
+        elif isinstance(packages, str):
+            self.packages = [packages]
+        else:
+            self.packages = packages
 
         # Lazy-loaded attributes
         self._r = None
@@ -247,76 +335,118 @@ class RFunctionCaller:
         self.ListVector = None
         self.NamedList = None
 
-        if self.script_path and not self.script_path.exists():
-            raise FileNotFoundError(f"R script not found: {self.script_path}")
-
-        self.script_dir = self.script_path.parent if self.script_path else None
-        self._script_loaded = False
+        # Internal state
         self._renv_activated = False
         self._packages_loaded = False
+        self._scripts_loaded = [False] * len(self.scripts)
 
     # -----------------------------------------------------------------
     # Internal: lazy R loading
     # -----------------------------------------------------------------
-    def _ensure_r_loaded(self):
-        if self._r is None:
-            r = _require_rpy2(raise_on_missing=True)
-            self._r = r
-            self.ro = r["ro"]
-            self.robjects = r["robjects"]
-            self.pandas2ri = r["pandas2ri"]
-            self.localconverter = r["localconverter"]
-            self.IntVector = r["IntVector"]
-            self.FloatVector = r["FloatVector"]
-            self.BoolVector = r["BoolVector"]
-            self.StrVector = r["StrVector"]
-            self.ListVector = r["ListVector"]
-            self.NamedList = r["NamedList"]
+    def _ensure_r_loaded(self) -> None:
+        """
+        Ensure R runtime is initialized and all configured R scripts
+        are sourced exactly once, in isolated environments.
+        """
+        if self.robjects is None:
+            rpy2_dict = _ensure_rpy2()
+            self._RPY2 = rpy2_dict  # cache in instance
+            self._r = rpy2_dict["ro"]
+            self.ro = rpy2_dict["robjects"]
+            self.robjects = rpy2_dict["robjects"]
+            self.pandas2ri = rpy2_dict["pandas2ri"]
+            self.localconverter = rpy2_dict["localconverter"]
+            self.IntVector = rpy2_dict["IntVector"]
+            self.FloatVector = rpy2_dict["FloatVector"]
+            self.BoolVector = rpy2_dict["BoolVector"]
+            self.StrVector = rpy2_dict["StrVector"]
+            self.ListVector = rpy2_dict["ListVector"]
+            self.NamedList = rpy2_dict["NamedList"]
 
-        # Activate renv
-        if self.path_to_renv and not self._renv_activated:
-            activate_renv(self.path_to_renv)
-            self._renv_activated = True
+        r = self.robjects.r
 
-        # Load packages
-        if self.packages and not self._packages_loaded:
-            for pkg in self.packages:
-                try:
-                    self.robjects.r(f'suppressMessages(library("{pkg}"))')
-                except Exception:
-                    logger.info(f"Package '{pkg}' not found. Installing...")
-                    self.robjects.r(
-                        f'install.packages("{pkg}", repos="https://cloud.r-project.org")'
+        # Ensure required R package
+        self.ensure_r_package("withr")
+
+        if not hasattr(self, "_namespaces"):
+            self._namespaces: dict[str, dict[str, Any]] = {}
+
+        # --- Iterate over scripts ---
+        for idx, script_entry in enumerate(self.scripts):
+            if self._scripts_loaded[idx]:
+                continue
+
+            script_entry = script_entry.resolve()
+
+            if script_entry.is_file():
+                r_files = [script_entry]
+            elif script_entry.is_dir():
+                r_files = sorted(script_entry.glob("*.R"))
+                if not r_files:
+                    logger.warning(f"No .R files found in directory: {script_entry}")
+                    self._scripts_loaded[idx] = True
+                    continue
+            else:
+                raise ValueError(f"Invalid script path: {script_entry}")
+
+            for script_path in r_files:
+                ns_name = script_path.stem
+                logger.info(
+                    f"Loading R script '{script_path.name}' as namespace '{ns_name}'"
+                )
+
+                r("env <- new.env(parent=globalenv())")
+                r(f'script_path <- "{script_path.as_posix()}"')
+
+                r(
+                    """
+                    withr::with_dir(
+                        dirname(script_path),
+                        sys.source(basename(script_path), envir=env)
                     )
-                    self.robjects.r(f'suppressMessages(library("{pkg}"))')
-            self._packages_loaded = True
+                    """
+                )
 
-        # Source script
-        if self.script_path and not self._script_loaded:
-            self.robjects.r(f'setwd("{self.script_dir.as_posix()}")')
-            self.robjects.r(f'source("{self.script_path.as_posix()}")')
-            logger.info(f"R script sourced: {self.script_path.name}")
-            self._script_loaded = True
+                env_obj = r("env")
+                self._namespaces[ns_name] = {
+                    name: env_obj[name]
+                    for name in env_obj.keys()
+                    if callable(env_obj[name])
+                }
+
+                logger.info(
+                    f"Registered {len(self._namespaces[ns_name])} functions in namespace '{ns_name}'"
+                )
+
+            self._scripts_loaded[idx] = True
+
+    # -----------------------------------------------------------------
+    # Autocomplete-friendly attribute access for script namespaces
+    # -----------------------------------------------------------------
+    def __getattr__(self, name: str):
+        if "_namespaces" in self.__dict__ and name in self._namespaces:
+            ns_env = self._namespaces[name]
+            return NamespaceWrapper(ns_env)
+        raise AttributeError(f"'RFunctionCaller' object has no attribute '{name}'")
 
     def _clean_scalar(self, x):
         """
         Clean R-style missing values to pandas/NumPy equivalents.
         Called inside _r2py on each vector element; atomic/scalar only.
         """
-        r = self._r
-        ro = r["robjects"]
+        robjects = self.robjects
 
         if x is None:
             return None
 
         if x in (
-            getattr(ro, "NA_Real", None),
-            getattr(ro, "NA_Integer", None),
-            getattr(ro, "NA_Logical", None),
+            getattr(robjects, "NA_Real", None),
+            getattr(robjects, "NA_Integer", None),
+            getattr(robjects, "NA_Logical", None),
         ):
             return None
 
-        if x is getattr(ro, "NA_Character", None):
+        if x is getattr(robjects, "NA_Character", None):
             return None
 
         if isinstance(x, float) and np.isnan(x):
@@ -340,92 +470,56 @@ class RFunctionCaller:
         StrVector = self.StrVector
         ListVector = self.ListVector
         localconverter = self.localconverter
-        import pandas as pd
-        import rpy2.robjects.vectors as rvec
 
-        # Pass through existing R objects
-        if isinstance(
-            obj,
-            (
-                rvec.IntVector,
-                rvec.FloatVector,
-                rvec.BoolVector,
-                rvec.StrVector,
-                rvec.ListVector,
-                robjects.DataFrame,
-            ),
-        ):
+        r_types = (
+            robjects.vectors.IntVector,
+            robjects.vectors.FloatVector,
+            robjects.vectors.BoolVector,
+            robjects.vectors.StrVector,
+            robjects.vectors.ListVector,
+            robjects.DataFrame,
+        )
+        if isinstance(obj, r_types):
             return obj
 
-        with localconverter(robjects.default_converter + pandas2ri.converter):
-            if obj is None or obj is pd.NA:
-                return robjects.NULL
+        def is_na(x):
+            return x is None or x is pd.NA or (isinstance(x, float) and pd.isna(x))
 
-            # DataFrame → data.frame
+        with localconverter(robjects.default_converter + pandas2ri.converter):
+            if is_na(obj):
+                return robjects.NULL
             if isinstance(obj, pd.DataFrame):
                 return pandas2ri.py2rpy(obj)
-
-            # Series → vector
             if isinstance(obj, pd.Series):
                 return self._py2r(obj.tolist())
-
-            # Scalars
             if isinstance(obj, (int, float, bool, str)):
                 return obj
-
-            # Lists
             if isinstance(obj, list):
                 if len(obj) == 0:
                     return FloatVector([])
-                elif all(isinstance(x, (int, float)) or x is None for x in obj):
-                    return FloatVector(
-                        [robjects.NA_Real if x is None else float(x) for x in obj]
-                    )
 
-                def is_na(x):
-                    return (
-                        x is None or x is pd.NA or (isinstance(x, float) and pd.isna(x))
-                    )
-
-                # Homogeneous numeric
-                if all(
-                    isinstance(x, (int, float)) and not isinstance(x, bool) or is_na(x)
-                    for x in obj
-                ):
+                types = set(type(x) for x in obj if not is_na(x))
+                if types <= {int, float}:
                     return FloatVector(
                         [robjects.NA_Real if is_na(x) else float(x) for x in obj]
                     )
-
-                # Homogeneous bool
-                if all(isinstance(x, bool) or is_na(x) for x in obj):
+                if types <= {bool}:
                     return BoolVector(
                         [robjects.NA_Logical if is_na(x) else x for x in obj]
                     )
-
-                # Homogeneous str
-                if all(isinstance(x, str) or is_na(x) for x in obj):
+                if types <= {str}:
                     return StrVector(
                         [robjects.NA_Character if is_na(x) else x for x in obj]
                     )
-
-                # Mixed or nested list → ListVector with positional keys
                 return ListVector({str(i): self._py2r(v) for i, v in enumerate(obj)})
-
-            # Dict → NamedList
             if isinstance(obj, dict):
                 return ListVector({k: self._py2r(v) for k, v in obj.items()})
-
             raise NotImplementedError(f"Cannot convert Python object to R: {type(obj)}")
 
     # -----------------------------------------------------------------
     # R -> Python conversion
     # -----------------------------------------------------------------
     def _r2py(self, obj, top_level=True):
-        """
-        Convert R objects to Python objects robustly.
-        Handles DataFrames, NamedList/ListVector, atomic vectors, and NULL.
-        """
-        r = self._r
         robjects = self.robjects
         NamedList = self.NamedList
         ListVector = self.ListVector
@@ -433,7 +527,7 @@ class RFunctionCaller:
         IntVector = self.IntVector
         FloatVector = self.FloatVector
         BoolVector = self.BoolVector
-        NULLType = r["NULLType"]
+        NULLType = self._RPY2["NULLType"]
         lc = self.localconverter
         pandas2ri = self.pandas2ri
 
@@ -444,12 +538,10 @@ class RFunctionCaller:
             with lc(robjects.default_converter + pandas2ri.converter):
                 df = robjects.conversion.rpy2py(obj)
             df = postprocess_r_dataframe(df)
-            df = clean_r_missing(df, caller=self)
-            return df
+            return clean_r_missing(df, caller=self)
 
         if isinstance(obj, (NamedList, ListVector)):
             py_obj = r_namedlist_to_dict(obj, caller=self, top_level=top_level)
-            # Auto-unpack single-element lists only at top-level
             if isinstance(py_obj, list) and len(py_obj) == 1 and top_level:
                 return py_obj[0]
             return py_obj
@@ -465,58 +557,79 @@ class RFunctionCaller:
     # -----------------------------------------------------------------
     # Public: ensure R package is available
     # -----------------------------------------------------------------
-    def ensure_r_package(self, pkg_name: str):
+    def ensure_r_package(self, pkg: str):
         r = self.robjects.r
         try:
-            r(f'suppressMessages(library("{pkg_name}", character.only=TRUE))')
+            r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
         except Exception:
-            r(f'install.packages("{pkg_name}", repos="https://cloud.r-project.org")')
-            r(f'suppressMessages(library("{pkg_name}", character.only=TRUE))')
+            logger.info(f"Package '{pkg}' not found.")
+            logger.warning(f"Installing missing R package: {pkg}")
+            r(f'install.packages("{pkg}", repos="https://cloud.r-project.org")')
+            r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
 
     # -----------------------------------------------------------------
     # Public: call an R function
     # -----------------------------------------------------------------
     def call(self, func_name: str, *args, **kwargs):
-        """
-        Call an R function safely. Supports:
-        - functions defined in scripts
-        - base R functions
-        - functions in loaded packages
-        """
         self._ensure_r_loaded()
 
-        # --- Find the function ---
         func = None
-        try:
-            func = self.robjects.globalenv[func_name]  # script-defined
-        except KeyError:
-            try:
-                func = self.robjects.r[func_name]  # base or package function
-            except KeyError:
-                # --- Added: handle namespaced functions like stats::median ---
-                if "::" in func_name:
-                    pkg, fname = func_name.split("::", 1)
-                    try:
-                        func = self.robjects.r(f"{pkg}::{fname}")
-                    except Exception as e:
-                        raise RuntimeError(
-                            f"Failed to load R function '{func_name}' via namespace: {e}"
-                        ) from e
+        source_info = None
 
-                if func is None:
-                    raise ValueError(f"R function '{func_name}' not found.")
+        if "::" in func_name:
+            ns_name, fname = func_name.split("::", 1)
+            if ns_name in self._namespaces:
+                ns_env = self._namespaces[ns_name]
+                if fname in ns_env:
+                    func = ns_env[fname]
+                    source_info = f"script namespace '{ns_name}'"
+                else:
+                    raise ValueError(
+                        f"Function '{fname}' not found in R script namespace '{ns_name}'"
+                    )
+            else:
+                try:
+                    func = self.robjects.r(f"{ns_name}::{fname}")
+                    source_info = f"R package '{ns_name}'"
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to resolve R function '{func_name}': {e}"
+                    ) from e
 
-        # --- Convert Python args to R ---
+        else:
+            for ns_name, ns_env in self._namespaces.items():
+                if func_name in ns_env:
+                    func = ns_env[func_name]
+                    source_info = f"script namespace '{ns_name}'"
+                    break
+
+            if func is None:
+                try:
+                    func = self.robjects.globalenv[func_name]
+                    source_info = "global environment"
+                except KeyError:
+                    pass
+
+            if func is None:
+                try:
+                    func = self.robjects.r[func_name]
+                    source_info = "base R / loaded package"
+                except KeyError:
+                    raise ValueError(
+                        f"R function '{func_name}' not found in any namespace, global env, or base R."
+                    )
+
         r_args = [self._py2r(a) for a in args]
         r_kwargs = {k: self._py2r(v) for k, v in kwargs.items()}
 
-        # --- Call safely ---
         try:
             result = func(*r_args, **r_kwargs)
         except Exception as e:
-            raise RuntimeError(f"Error calling R function '{func_name}': {e}")
+            raise RuntimeError(
+                f"Error calling R function '{func_name}' from {source_info}: {e}"
+            ) from e
 
-        # --- Convert R result back to Python ---
+        logger.info(f"Called R function '{func_name}' from {source_info}")
         return self._r2py(result)
 
 
@@ -525,10 +638,6 @@ class RFunctionCaller:
 # Utility functions for R ↔ Python
 # ------------------------------
 def r_namedlist_to_dict(namedlist, caller: RFunctionCaller, top_level=False):
-    """
-    Recursively convert an R NamedList or ListVector to a Python dictionary.
-    Uses the caller._r2py method for nested conversions.
-    """
     r = _ensure_rpy2()
     NamedList = r["NamedList"]
     ListVector = r["ListVector"]
@@ -536,31 +645,24 @@ def r_namedlist_to_dict(namedlist, caller: RFunctionCaller, top_level=False):
     if isinstance(namedlist, (NamedList, ListVector)):
         names = namedlist.names if not callable(namedlist.names) else namedlist.names()
 
-        # Detect positional (unnamed) list
         if names and all(str(i) == str(name) for i, name in enumerate(names)):
             out = []
             for v in namedlist:
-                # Nested elements are never top-level
                 val = caller._r2py(v, top_level=False)
                 out.append(val)
             return out
 
-        # Otherwise dict
         result = {}
         for i, val in enumerate(namedlist):
             key = names[i] if names and i < len(names) else str(i)
-            v_py = caller._r2py(val, top_level=False)  # nested elements
+            v_py = caller._r2py(val, top_level=False)
             result[str(key)] = v_py
         return result
 
-    # Fallback: scalar/vector at the very top
     return caller._r2py(namedlist, top_level=top_level)
 
 
 def clean_r_dataframe(r_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Clean an R data.frame by removing non-structural attributes like .groups and .rows.
-    """
     for attr in [".groups", ".rows"]:
         try:
             del r_df.attrs[attr]
@@ -570,18 +672,11 @@ def clean_r_dataframe(r_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fix_string_nans(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Replace string NAs or empty strings with pd.NA.
-    """
     return df.replace(["nan", "NaN", "NA", "na", ""], pd.NA)
 
 
 def normalize_single_df_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize dtypes in a single DataFrame after R conversion.
-    """
     df = df.replace(["", "nan", "NaN", "NA", "na"], pd.NA)
-
     for col in df.columns:
         series = df[col]
         if pd.api.types.is_object_dtype(series):
@@ -594,18 +689,10 @@ def normalize_single_df_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Post-process R DataFrame:
-    - Convert R NA_integer_ sentinel (-2147483648) to pd.NA
-    - Convert R-style numeric dates to datetime
-    - Remove timezone from datetime columns
-    """
     for col in df.columns:
         series = df[col]
-
         if pd.api.types.is_integer_dtype(series):
             df[col] = series.mask(series == -2147483648, pd.NA)
-
         if pd.api.types.is_numeric_dtype(series):
             values = series.dropna()
             if not values.empty and values.between(10000, 40000).all():
@@ -615,24 +702,15 @@ def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
                     )
                 except Exception:
                     pass
-
         if pd.api.types.is_datetime64tz_dtype(series):
             df[col] = series.dt.tz_localize(None)
-
     return df
 
 
 def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Apply a series of fixes to a DataFrame converted from R:
-    - Type corrections
-    - String NA normalization
-    - Index normalization
-    """
     df = fix_r_dataframe_types(df)
     df = fix_string_nans(df)
     df = normalize_single_df_dtypes(df)
-
     if df.index.dtype == object:
         try:
             int_index = df.index.astype(int)
@@ -644,62 +722,37 @@ def postprocess_r_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def clean_r_missing(obj, caller: RFunctionCaller):
-    """
-    Post-process R return objects for downstream Python use.
-    Recursively convert R-style missing values to pandas/NumPy:
-    - NA_integer_, NA_real_, NA_logical_ → np.nan
-    - NA_character_ → pd.NA
-    """
-    r = _ensure_rpy2()
-    ro = r["robjects"]
-
+    robjects = caller.robjects
     NA_MAP = {
-        getattr(ro, "NA_Real", None): np.nan,
-        getattr(ro, "NA_Integer", None): np.nan,
-        getattr(ro, "NA_Logical", None): np.nan,
-        getattr(ro, "NA_Character", None): pd.NA,
+        getattr(robjects, "NA_Real", None): np.nan,
+        getattr(robjects, "NA_Integer", None): np.nan,
+        getattr(robjects, "NA_Logical", None): np.nan,
+        getattr(robjects, "NA_Character", None): pd.NA,
     }
 
     if isinstance(obj, pd.DataFrame):
         for col in obj.columns:
             obj[col] = obj[col].apply(lambda x: clean_r_missing(x, caller))
         return obj
-
     elif isinstance(obj, dict):
         return {k: clean_r_missing(v, caller) for k, v in obj.items()}
-
     elif isinstance(obj, list):
         return [clean_r_missing(v, caller) for v in obj]
-
     else:
         return NA_MAP.get(obj, obj)
 
 
-# %%
-# -------------------------------------------
-# Functions here onwards are utility functions
-# for comparing R and Python DataFrames.
-# -------------------------------------------
-
-
+# ---------------------------------------------------------------------
+# DataFrame comparison utilities
+# ---------------------------------------------------------------------
 def normalize_dtypes(
     df1: pd.DataFrame, df2: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Aligns column dtypes across two DataFrames for accurate comparison.
-    - Replaces empty strings with pd.NA.
-    - Attempts to coerce strings to numeric where applicable.
-    - Aligns dtypes between matching columns (e.g. float64 vs int64).
-    """
     for col in df1.columns.intersection(df2.columns):
-        # Replace empty strings with NA
         df1[col] = df1[col].replace("", pd.NA)
         df2[col] = df2[col].replace("", pd.NA)
-
         s1, s2 = df1[col], df2[col]
         dtype1, dtype2 = s1.dtype, s2.dtype
-
-        # If one is numeric and the other is object, try coercing both to numeric
         if (
             pd.api.types.is_numeric_dtype(dtype1)
             and pd.api.types.is_object_dtype(dtype2)
@@ -710,98 +763,57 @@ def normalize_dtypes(
             try:
                 df1[col] = pd.to_numeric(s1, errors="coerce")
                 df2[col] = pd.to_numeric(s2, errors="coerce")
-                continue  # skip to next column if coercion succeeds
+                continue
             except Exception:
-                pass  # fallback to next block if coercion fails
-
-        # If both are numeric but of different types (e.g., int vs float), unify to float64
+                pass
         if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(
             dtype2
         ):
             df1[col] = df1[col].astype("float64")
             df2[col] = df2[col].astype("float64")
             continue
-
-        # If both are objects or strings, convert both to str for equality comparison
         if pd.api.types.is_object_dtype(dtype1) or pd.api.types.is_object_dtype(dtype2):
             df1[col] = df1[col].astype(str)
             df2[col] = df2[col].astype(str)
-
     return df1, df2
 
 
-# %%
 def align_numeric_dtypes(
     df1: pd.DataFrame, df2: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Ensure aligned numeric dtypes between two DataFrames for accurate comparison.
-    Converts between int, float, and numeric-looking strings where appropriate.
-    Also handles NA and empty string normalization.
-    """
     for col in df1.columns.intersection(df2.columns):
-        s1, s2 = df1[col], df2[col]
-
-        # Replace empty strings with NA to avoid type promotion issues
-        s1 = s1.replace("", pd.NA)
-        s2 = s2.replace("", pd.NA)
-
-        # Try to coerce both to numeric (non-destructive)
+        s1, s2 = df1[col].replace("", pd.NA), df2[col].replace("", pd.NA)
         try:
             s1_num = pd.to_numeric(s1, errors="coerce")
             s2_num = pd.to_numeric(s2, errors="coerce")
-
-            # If at least one successfully converts and it's not all NaN
             if not s1_num.isna().all() or not s2_num.isna().all():
                 df1[col] = s1_num.astype("float64")
                 df2[col] = s2_num.astype("float64")
-                continue  # move to next column
+                continue
         except Exception:
             pass
-
-        # Otherwise, fall back to original values
-        df1[col] = s1
-        df2[col] = s2
-
+        df1[col], df2[col] = s1, s2
     return df1, df2
 
 
-# %%
 def compare_r_py_dataframes(
     df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8
 ) -> dict:
-    """
-    Compare a Python DataFrame (df1) with an R DataFrame converted to pandas (df2).
-
-    Returns:
-        dict with mismatch diagnostics, preserving original indices in diffs.
-    """
-
     results: dict[str, Any] = {
         "shape_mismatch": False,
         "columns_mismatch": False,
         "index_mismatch": False,
-        "numeric_diffs": {},  # type: dict[str, pd.DataFrame]
-        "non_numeric_diffs": {},  # type: dict[str, pd.DataFrame]
+        "numeric_diffs": {},
+        "non_numeric_diffs": {},
     }
-
-    # --- Preprocessing: fix R-specific issues ---
     df2 = fix_r_dataframe_types(df2)
-
-    # --- Replace common string NAs with proper pd.NA ---
     df1 = fix_string_nans(df1)
     df2 = fix_string_nans(df2)
-
-    # --- Normalize and align dtypes ---
     df1, df2 = normalize_dtypes(df1.copy(), df2.copy())
     df1, df2 = align_numeric_dtypes(df1, df2)
-
-    # --- Check shape ---
     if df1.shape != df2.shape:
         results["shape_mismatch"] = True
         print(f"[Warning] Shape mismatch: df1 {df1.shape} vs df2 {df2.shape}")
-
-    # --- Check columns ---
     if set(df1.columns) != set(df2.columns):
         results["columns_mismatch"] = True
         print("[Warning] Column mismatch:")
@@ -810,21 +822,13 @@ def compare_r_py_dataframes(
         common_cols = df1.columns.intersection(df2.columns)
     else:
         common_cols = df1.columns
-
-    # --- Ensure columns are the same order ---
-    df1_aligned = df1.loc[:, common_cols]
-    df2_aligned = df2.loc[:, common_cols]
-
-    # --- Compare values column by column ---
+    df1_aligned, df2_aligned = df1.loc[:, common_cols], df2.loc[:, common_cols]
     for col in common_cols:
-        col_py = df1_aligned[col]
-        col_r = df2_aligned[col]
-
+        col_py, col_r = df1_aligned[col], df2_aligned[col]
         if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(
             col_r
         ):
             col_py, col_r = col_py.align(col_r)
-
             close = np.isclose(
                 col_py.fillna(np.nan),
                 col_r.fillna(np.nan),
@@ -832,30 +836,15 @@ def compare_r_py_dataframes(
                 equal_nan=True,
             )
             if not close.all():
-                diffs = pd.DataFrame(
-                    {
-                        "df1": col_py[~close],
-                        "df2": col_r[~close],
-                    }
+                results["numeric_diffs"][col] = pd.DataFrame(
+                    {"df1": col_py[~close], "df2": col_r[~close]}
                 )
-                results["numeric_diffs"][col] = diffs
-
         else:
-            # Treat missing values as equal: create mask where values differ excluding matching NAs
             unequal = ~col_py.eq(col_r)
             both_na = col_py.isna() & col_r.isna()
             unequal = unequal & ~both_na
-
             if unequal.any():
-                diffs = pd.DataFrame(
-                    {
-                        "df1": col_py[unequal],
-                        "df2": col_r[unequal],
-                    }
+                results["non_numeric_diffs"][col] = pd.DataFrame(
+                    {"df1": col_py[unequal], "df2": col_r[unequal]}
                 )
-                results["non_numeric_diffs"][col] = diffs
-
     return results
-
-
-# %%

@@ -6,6 +6,7 @@ continue importing directly from ``rpy_bridge``.
 """
 
 from .rpy2_utils import (
+    NamespaceWrapper,
     RFunctionCaller,
     activate_renv,
     align_numeric_dtypes,
@@ -23,6 +24,7 @@ from .rpy2_utils import (
 __all__ = [
     "activate_renv",
     "RFunctionCaller",
+    "NamespaceWrapper",
     "r_namedlist_to_dict",
     "clean_r_dataframe",
     "fix_string_nans",
