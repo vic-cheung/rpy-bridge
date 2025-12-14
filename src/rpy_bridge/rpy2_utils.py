@@ -318,7 +318,7 @@ class RFunctionCaller:
     def __init__(
         self,
         path_to_renv: Path | None = None,
-        scripts: Path | list[Path] | None = None,
+        scripts: str | Path | list[str | Path] | None = None,
         packages: str | list[str] | None = None,
         **kwargs,  # catch unexpected keywords
     ):

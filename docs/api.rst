@@ -57,7 +57,7 @@ RFunctionCaller is the main class to interact with R scripts, packages, and func
 ```python
 caller = RFunctionCaller(
     path_to_renv: Path | None = None,
-    scripts: Path | list[Path] | None = None,
+    scripts: str | Path | list[str | Path] | None = None
     packages: str | list[str] | None = None
 )
 ```
