@@ -122,31 +122,49 @@ def find_r_home() -> str | None:
     return None
 
 
-if "R_HOME" not in os.environ:
+# Determine if we're running in CI / testing
+CI_TESTING = (
+    os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("TESTING") == "1"
+)
+
+R_HOME = os.environ.get("R_HOME")
+if not R_HOME:
     R_HOME = find_r_home()
     if not R_HOME:
-        raise RuntimeError("R not found. Please install R or add it to PATH.")
-    os.environ["R_HOME"] = R_HOME
-else:
-    R_HOME = os.environ["R_HOME"]
+        if CI_TESTING:
+            logger.warning(
+                "R not found; skipping all R-dependent setup in CI/testing environment."
+            )
+            R_HOME = None  # Explicitly None to signal "no R available"
+        else:
+            raise RuntimeError("R not found. Please install R or add it to PATH.")
+    else:
+        os.environ["R_HOME"] = R_HOME
 
-logger.info(f"R_HOME = {R_HOME}")
-os.environ["R_HOME"] = R_HOME
-ensure_rpy2_available()
+logger.info(
+    f"R_HOME = {R_HOME if R_HOME else 'not detected; R-dependent code skipped'}"
+)
 
-# macOS dynamic library path
-if sys.platform == "darwin":
-    lib_path = os.path.join(R_HOME, "lib")
-    if lib_path not in os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", ""):
-        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = (
-            f"{lib_path}:{os.environ.get('DYLD_FALLBACK_LIBRARY_PATH','')}"
-        )
+# Only configure platform-specific library paths if R is available
+if R_HOME:
+    if sys.platform == "darwin":
+        lib_path = os.path.join(R_HOME, "lib")
+        if lib_path not in os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", ""):
+            os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = (
+                f"{lib_path}:{os.environ.get('DYLD_FALLBACK_LIBRARY_PATH','')}"
+            )
 
-elif sys.platform.startswith("linux"):
-    lib_path = os.path.join(R_HOME, "lib")
-    ld_path = os.environ.get("LD_LIBRARY_PATH", "")
-    if lib_path not in ld_path.split(":"):
-        os.environ["LD_LIBRARY_PATH"] = f"{lib_path}:{ld_path}"
+    elif sys.platform.startswith("linux"):
+        lib_path = os.path.join(R_HOME, "lib")
+        ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+        if lib_path not in ld_path.split(":"):
+            os.environ["LD_LIBRARY_PATH"] = f"{lib_path}:{ld_path}"
+
+    elif sys.platform.startswith("win"):
+        bin_path = os.path.join(R_HOME, "bin", "x64")
+        path_env = os.environ.get("PATH", "")
+        if bin_path not in path_env.split(os.pathsep):
+            os.environ["PATH"] = f"{bin_path}{os.pathsep}{path_env}"
 
 
 # ---------------------------------------------------------------------
