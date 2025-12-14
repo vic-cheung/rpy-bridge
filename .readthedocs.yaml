@@ -1,12 +1,5 @@
 version: 3
 
-environment:
-  variables:
-    # Prevent rpy2 from trying to find a system R
-    RPY2_CFFI_MODE: ABI
-    # Extra safety
-    R_HOME: ""
-
 build:
   os: ubuntu-20.04
   tools:
