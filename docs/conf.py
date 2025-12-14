@@ -1,6 +1,9 @@
 import os
 import sys
 
+os.environ.setdefault("RPY2_CFFI_MODE", "ABI")
+
+
 # Put the package src on sys.path so autodoc can import it
 sys.path.insert(0, os.path.abspath("../src"))
 
