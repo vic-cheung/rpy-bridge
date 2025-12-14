@@ -10,8 +10,8 @@ Demonstrates advanced usage of RFunctionCaller.
 """
 
 from pathlib import Path
-from rpy_bridge import RFunctionCaller
 
+from rpy_bridge import RFunctionCaller
 
 # -----------------------------
 # Setup: paths to R scripts

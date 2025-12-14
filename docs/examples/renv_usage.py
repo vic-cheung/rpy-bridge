@@ -5,6 +5,7 @@ Demonstrates rpy-bridge usage with a project-specific renv environment.
 """
 
 from pathlib import Path
+
 from rpy_bridge import RFunctionCaller
 
 # ----------------------------------------
