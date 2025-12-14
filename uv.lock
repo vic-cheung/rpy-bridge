@@ -1258,7 +1258,7 @@ wheels = [
 
 [[package]]
 name = "rpy-bridge"
-version = "0.3.7"
+version = "0.3.8"
 source = { editable = "." }
 dependencies = [
     { name = "loguru" },
