@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath("../src"))
 
 project = "rpy-bridge"
 author = "Victoria Cheung"
-release = "0.0"
+release = "0.3.2"
 
 extensions = [
     "sphinx.ext.autodoc",
