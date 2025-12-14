@@ -15,7 +15,9 @@ Contents
 
    usage
    api
-   examples/*basic_usage
+   examples/basic_usage
+   examples/renv_usage
+   examples/advanced_usage
 
 Indices and tables
 ==================
