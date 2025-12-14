@@ -47,14 +47,14 @@ For full working examples, see the `examples/basic_usage.py` script:
 RFunctionCaller
 ===============
 
-.. py:class:: RFunctionCaller(path_to_renv=None, scripts=None, packages=None)
-
+.. py:class:: RFunctionCaller(path_to_renv: str | Path | None = None, scripts: str | Path | list[str | Path] | None = None, packages: str | list[str] | None = None)
+    
    Provides a Python interface to R scripts, functions, and environments.
 
    **Args:**
-     - path_to_renv (Path, optional): Directory containing a renv environment.
-     - scripts (Path or list[Path], optional): R scripts or directories to load.
-     - packages (str or list[str], optional): R packages to load.
+    - path_to_renv (str | Path, optional): Directory containing a renv environment.
+    - scripts (Path | str | list[Path] | list[str], optional): R scripts or directories to load.
+    - packages (str | list[str], optional): R packages to load.
 
    **Raises:**
      - FileNotFoundError: If a script path does not exist
