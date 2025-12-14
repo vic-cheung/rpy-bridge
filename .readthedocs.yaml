@@ -1,11 +1,11 @@
-version: 2
+version: 3
 
-# ⬇️ environment variables must be top-level
 environment:
-  # Prevent rpy2 from trying to find a system R
-  RPY2_CFFI_MODE: ABI
-  # Extra safety: some rpy2 versions look for this
-  R_HOME: ""
+  variables:
+    # Prevent rpy2 from trying to find a system R
+    RPY2_CFFI_MODE: ABI
+    # Extra safety
+    R_HOME: ""
 
 build:
   os: ubuntu-20.04
@@ -14,13 +14,10 @@ build:
 
 python:
   install:
-    # Install the package itself WITHOUT dependencies
     - method: pip
       path: .
       extra_args:
         - "--no-deps"
-
-    # Install documentation-only dependencies
     - requirements: docs/requirements.txt
 
 sphinx:
