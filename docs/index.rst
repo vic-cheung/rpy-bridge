@@ -3,13 +3,19 @@
 
 Welcome to rpy-bridge's documentation!
 
-Contents:
+rpy-bridge provides a Python interface to R scripts, R functions, and R environments
+with automatic conversion between Python and R data types.
+
+Contents
+--------
 
 .. toctree::
    :maxdepth: 2
+   :caption: Getting Started
 
    usage
    api
+   examples/*basic_usage
 
 Indices and tables
 ==================

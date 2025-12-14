@@ -1,34 +1,159 @@
-Usage
-=====
+rpy-bridge Usage
+================
 
-Quick examples showing common usage patterns for `RFunctionCaller`.
+rpy-bridge provides a Python interface to R scripts, R functions, and R environments with
+automatic conversion between Python and R data types. This page shows how to get started
+and highlights common usage patterns.
 
-Local script
+---
+
+Getting Started
+---------------
+
+Installation
 ------------
 
-If you have a local R script, source it and call its functions:
+**Prerequisites**
+
+- System R installed and available on `PATH` (rpy2 requires a working R installation).
+- Python 3.12+
+
+**From PyPI:**
+
+.. code-block:: bash
+
+    python3 -m pip install rpy-bridge[r]
+
+**Using UV package manager:**
+
+.. code-block:: bash
+
+    uv add rpy-bridge
+
+
+---
+
+Basic Usage Examples
+-------------------
+
+For full working examples, see the `examples/basic_usage.py` script:
+
+.. literalinclude:: ../examples/basic_usage.py
+   :language: python
+   :linenos:
+
+---
+
+RFunctionCaller
+===============
+
+.. py:class:: RFunctionCaller(path_to_renv=None, scripts=None, packages=None)
+
+   Provides a Python interface to R scripts, functions, and environments.
+
+   **Args:**
+     - path_to_renv (Path, optional): Directory containing a renv environment.
+     - scripts (Path or list[Path], optional): R scripts or directories to load.
+     - packages (str or list[str], optional): R packages to load.
+
+   **Raises:**
+     - FileNotFoundError: If a script path does not exist
+     - RuntimeError: If R is not found or rpy2 is missing
+
+Core Methods
+------------
+
+**call(func_name, *args, **kwargs)**
+
+Call an R function from a script, package, or global environment.
+
+Args:
+    - func_name (str): Name of the R function. Can be:
+        - 'function_name' for functions in scripts or global env
+        - 'package::function_name' for package functions
+    - *args: Positional arguments for the R function
+    - **kwargs: Keyword arguments for the R function
+
+Returns:
+    Any: Python object corresponding to R return value.
+
+Raises:
+    ValueError: Function not found
+    RuntimeError: Function call failed in R
+
+---
+
+**list_namespaces()**
+
+Return a list of all loaded script namespaces.
 
 .. code-block:: python
 
-    from pathlib import Path
-    from rpy_bridge import RFunctionCaller
+    namespaces = rfc.list_namespaces()
 
-    script_path = Path("./scripts/my_funcs.R")
-    caller = RFunctionCaller(path_to_renv=None, script=script_path)
-    result = caller.call("my_function", 1, named_arg="x")
+---
 
-Call installed R packages
--------------------------
+**list_namespace_functions(namespace)**
 
-Load installed R packages and call package functions directly (no script required):
+List callable functions in a specific script namespace.
 
 .. code-block:: python
 
-    from rpy_bridge import RFunctionCaller
+    funcs = rfc.list_namespace_functions("script1")
 
-    # Load the `stats` package and call `rnorm`
-    caller = RFunctionCaller(path_to_renv=None, packages=["stats"])
-    samples = caller.call("rnorm", 5, mean=10)
-    # Use namespace syntax for clarity
-    median_val = caller.call("stats::median", samples)
+---
 
+**print_function_tree(include_packages=False, max_display=10)**
+
+Pretty-print functions from loaded scripts and optionally packages. Example usage:
+
+.. code-block:: python
+
+    rfc.print_function_tree(include_packages=False, max_display=5)
+
+Example output:
+
+.. code-block:: text
+
+    script1/
+      add_numbers
+      multiply_numbers
+      ...
+    script2/
+      divide_numbers
+      subtract_numbers
+      ...
+
+---
+
+Troubleshooting
+===============
+
+R Not Found
+-----------
+
+- Ensure R is installed and in PATH
+- On CI/testing, R_HOME may be lazily checked to avoid breaking tests
+
+Function Not Found
+------------------
+
+- Check that the script has been loaded
+- Use `list_namespaces()` and `list_namespace_functions()` to inspect
+
+Data Conversion Issues
+---------------------
+
+- Missing values in R map to `None` or ``pd.NA``
+- Use `clean_r_dataframe()` or `fix_r_dataframe_types()` as needed
+
+---
+
+Examples Folder
+===============
+
+See the examples in the repository:
+
+- ``examples/basic_usage.py`` — Loading scripts and calling functions
+- ``examples/renv_usage.py`` — Working with renv environments
+- ``examples/advanced_usage.py`` — More advanced examples and other features
