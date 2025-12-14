@@ -133,7 +133,6 @@ R Not Found
 -----------
 
 - Ensure R is installed and in PATH
-- On CI/testing, R_HOME may be lazily checked to avoid breaking tests
 
 Function Not Found
 ------------------

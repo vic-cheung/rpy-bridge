@@ -1,4 +1,8 @@
-# API Reference
+API Reference
+=============
+
+Module: rpy_bridge
+------------------
 
 This section provides a reference for all modules, classes, and functions in `rpy-bridge`.
 
