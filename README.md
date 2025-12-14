@@ -91,12 +91,12 @@ uv sync
 from pathlib import Path
 from rpy_bridge import RFunctionCaller
 
-caller = RFunctionCaller(
+rfc = RFunctionCaller(
     path_to_renv=Path("/path/to/project"),
     script=Path("/path/to/script.R"),
 )
 
-summary_df = caller.call("summarize_cohort", cohort_df)
+summary_df = rfc.call("summarize_cohort", cohort_df)
 ```
 
 ---
