@@ -1,6 +1,6 @@
 [project]
 name = "rpy-bridge"
-version = "0.3.6"
+version = "0.3.7"
 description = "Python-to-R interoperability engine with environment management, type-safe conversions, data normalization, and safe R function execution."
 readme = "README.md"
 license = { file = "LICENSE" }
