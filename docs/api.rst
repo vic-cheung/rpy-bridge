@@ -112,21 +112,6 @@ to inspect what functions are available.
     rfc.print_function_tree()
 
 
-Accessing Script Namespaces (Advanced)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Each sourced R script is loaded into its own namespace and can be accessed
-as an attribute on the ``RFunctionCaller`` instance.
-
-.. code-block:: python
-
-    rfc.my_script.add_and_scale(2, 3)
-    rfc.my_script.list_functions()
-
-This is optional syntactic sugar; all functions can always be called via
-``rfc.call(...)``.
-
-
 Notes and Best Practices
 ------------------------
 
