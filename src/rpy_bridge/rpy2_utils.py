@@ -304,7 +304,6 @@ class RFunctionCaller:
         packages: str | list[str] | None = None,
         **kwargs,  # catch unexpected keywords
     ):
-        self.scripts = _normalize_scripts(scripts)
         # --- Handle deprecated 'script_path' ---
         if "script_path" in kwargs:
             script_path_value = kwargs.pop("script_path")
@@ -321,6 +320,13 @@ class RFunctionCaller:
                 logger.warning(
                     "'script_path' ignored because 'scripts' argument is also provided."
                 )
+
+        self.scripts = _normalize_scripts(scripts)
+
+        # --- Check all scripts exist immediately ---
+        for script_path in self.scripts:
+            if not script_path.exists():
+                raise FileNotFoundError(f"R script path not found: {script_path}")
 
         # Raise error if other unexpected kwargs remain
         if kwargs:
