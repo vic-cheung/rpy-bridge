@@ -32,10 +32,3 @@ Load installed R packages and call package functions directly (no script require
     # Use namespace syntax for clarity
     median_val = caller.call("stats::median", samples)
 
-Notes for ReadTheDocs
----------------------
-
-ReadTheDocs builds will mock heavy imports (R/rpy2, numpy, pandas) by default
-using the `autodoc_mock_imports` option in the Sphinx `conf.py`. That means
-examples will render as code blocks but will not be executed during RTD builds
-unless you provide a custom build environment with R and `rpy2` installed.
