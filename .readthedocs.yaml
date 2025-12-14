@@ -1,15 +1,16 @@
 version: 2
 
+# ⬇️ environment variables must be top-level
+environment:
+  # Prevent rpy2 from trying to find a system R
+  RPY2_CFFI_MODE: ABI
+  # Extra safety: some rpy2 versions look for this
+  R_HOME: ""
+
 build:
   os: ubuntu-20.04
   tools:
     python: "3.11"
-  environment:
-    variables:
-      # Prevent rpy2 from trying to find a system R
-      RPY2_CFFI_MODE: ABI
-      # Extra safety: some rpy2 versions look for this
-      R_HOME: ""
 
 python:
   install:
