@@ -58,6 +58,29 @@ except ImportError:
     logger = logging.getLogger("rpy-bridge")
 
 
+# --- Remove default handler to override global default ---
+logger.remove()
+
+# --- Add a "sink" for RFunctionCaller logs ---
+_rfc_logger = logger.bind(tag="[RFunctionCaller]")
+_rfc_logger.add(
+    sys.stderr,
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",  # Only show message
+    level="INFO",
+)
+
+
+def _log_r_call(func_name: str, source_info: str):
+    """
+    Log an R function call, showing only '[RFunctionCaller] Called ...'
+    """
+    _rfc_logger.opt(depth=1, record=False).info(
+        "[rpy-bridge.RFunctionCaller] Called R function '{}' from {}",
+        func_name,
+        source_info,
+    )
+
+
 # ---------------------------------------------------------------------
 # Path resolution
 # ---------------------------------------------------------------------
@@ -142,7 +165,7 @@ if not R_HOME:
         os.environ["R_HOME"] = R_HOME
 
 logger.info(
-    f"R_HOME = {R_HOME if R_HOME else 'not detected; R-dependent code skipped'}"
+    f"[rpy-bridge] R_HOME = {R_HOME if R_HOME else 'not detected; R-dependent code skipped'}"
 )
 
 # Only configure platform-specific library paths if R is available
@@ -248,24 +271,24 @@ def activate_renv(path_to_renv: Path) -> None:
     renviron_file = project_dir / ".Renviron"
     if renviron_file.is_file():
         os.environ["R_ENVIRON_USER"] = str(renviron_file)
-        logger.info(f"R_ENVIRON_USER set to: {renviron_file}")
+        logger.info(f"[rpy-bridge] R_ENVIRON_USER set to: {renviron_file}")
 
     rprofile_file = project_dir / ".Rprofile"
     if rprofile_file.is_file():
         robjects.r(f'source("{rprofile_file.as_posix()}")')
-        logger.info(f".Rprofile sourced: {rprofile_file}")
+        logger.info(f"[rpy-bridge] .Rprofile sourced: {rprofile_file}")
 
     try:
         robjects.r("suppressMessages(library(renv))")
     except Exception:
-        logger.info("Installing renv package in project library...")
+        logger.info("[rpy-bridge] Installing renv package in project library...")
         robjects.r(
             f'install.packages("renv", repos="https://cloud.r-project.org", lib="{renv_dir / "library"}")'
         )
         robjects.r("library(renv)")
 
     robjects.r(f'renv::load("{project_dir.as_posix()}")')
-    logger.info(f"renv environment loaded for project: {project_dir}")
+    logger.info(f"[rpy-bridge] renv environment loaded for project: {project_dir}")
 
 
 # ---------------------------------------------------------------------
@@ -453,8 +476,10 @@ class RFunctionCaller:
 
             for script_path in r_files:
                 ns_name = script_path.stem
-                logger.info(
-                    f"Loading R script '{script_path.name}' as namespace '{ns_name}'"
+                logger.opt(depth=2).info(
+                    "[rpy-bridge.RFunctionCaller] Loading R script '{}' as namespace '{}'",
+                    script_path.name,
+                    ns_name,
                 )
 
                 r("env <- new.env(parent=globalenv())")
@@ -477,7 +502,7 @@ class RFunctionCaller:
                 }
 
                 logger.info(
-                    f"Registered {len(self._namespaces[ns_name])} functions in namespace '{ns_name}'"
+                    f"[rpy-bridge.RFunctionCaller] Registered {len(self._namespaces[ns_name])} functions in namespace '{ns_name}'"
                 )
 
             self._scripts_loaded[idx] = True
@@ -723,8 +748,10 @@ class RFunctionCaller:
         try:
             r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
         except Exception:
-            logger.info(f"Package '{pkg}' not found.")
-            logger.warning(f"Installing missing R package: {pkg}")
+            logger.info(f"[rpy-bridge.RFunctionCaller] Package '{pkg}' not found.")
+            logger.warning(
+                f"[rpy-bridge.RFunctionCaller] Installing missing R package: {pkg}"
+            )
             r(f'install.packages("{pkg}", repos="https://cloud.r-project.org")')
             r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
 
@@ -822,7 +849,8 @@ class RFunctionCaller:
                 f"Error calling R function '{func_name}' from {source_info}: {e}"
             ) from e
 
-        logger.info(f"Called R function '{func_name}' from {source_info}")
+        _log_r_call(func_name, source_info)
+
         return self._r2py(result)
 
 
