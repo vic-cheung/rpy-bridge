@@ -296,23 +296,36 @@ class NamespaceWrapper:
 # ---------------------------------------------------------------------
 class RFunctionCaller:
     """
-    Utility to load and call R functions from scripts, lazily loading rpy2 and activating renv.
+    Primary interface for calling R functions from Python.
 
-    Supports:
-    - Single or multiple R scripts
-    - R script directories (sources all `.R` files inside)
-    - Base R functions
-    - Functions in loaded packages
-    - Automatic conversion of Python types to R objects
+    ``RFunctionCaller`` loads one or more R scripts into isolated namespaces
+    and provides a unified ``call()`` method for executing:
 
-    Args:
-        scripts:
-            Path or list of Paths.
-            Each path may be:
-            - an R script (.R file)
-            - a directory containing R scripts (all *.R files are sourced)
-            - scripts in subdirectories are not automatically sourced
+    * Functions defined in sourced R scripts
+    * Base R functions (e.g. ``sum``, ``mean``)
+    * Functions from installed R packages (via ``package::function``)
 
+    In most workflows, users only need to interact with this class.
+
+    Parameters
+    ----------
+    path_to_renv : Path or None, optional
+        Path to an R project that uses ``renv``. This may be either the project
+        root or the ``renv/`` directory itself. If provided, the renv
+        environment is activated before any scripts are sourced.
+
+    scripts : str, Path, list[str | Path], or None, optional
+        One or more ``.R`` files or directories containing ``.R`` files.
+        Each script is sourced into its own namespace.
+
+    packages : str or list[str], optional
+        R packages to load (and install if missing) before calling functions.
+
+    Notes
+    -----
+    * Python objects are automatically converted to R objects.
+    * R return values are converted back to Python equivalents.
+    * Missing values (``None``, ``pd.NA``) are mapped to R ``NA``.
     """
 
     def __init__(
@@ -505,7 +518,12 @@ class RFunctionCaller:
 
     def list_namespaces(self) -> list[str]:
         """
-        Return all loaded R script namespaces.
+        Return the names of all loaded script namespaces.
+
+        Returns
+        -------
+        list[str]
+            Names of sourced R script namespaces.
         """
         self._ensure_r_loaded()
         return list(self._namespaces.keys())
@@ -572,11 +590,19 @@ class RFunctionCaller:
         self, include_packages: bool = False, max_display: int = 10
     ):
         """
-        Pretty-print all callable R functions in a tree-like structure.
+        Pretty-print available R functions grouped by namespace.
 
-        Args:
-            include_packages: Include functions from loaded R packages.
-            max_display: Maximum functions to show per namespace/package.
+        Parameters
+        ----------
+        include_packages : bool, default False
+            Whether to include functions from loaded R packages.
+
+        max_display : int, default 10
+            Maximum number of functions displayed per namespace.
+
+        Notes
+        -----
+        This method is intended for interactive exploration and debugging.
         """
         all_funcs = self.list_all_functions(include_packages=include_packages)
 
@@ -706,6 +732,38 @@ class RFunctionCaller:
     # Public: call an R function
     # -----------------------------------------------------------------
     def call(self, func_name: str, *args, **kwargs):
+        """
+        Call an R function.
+
+        The function may be defined in:
+        * a sourced R script
+        * an installed R package (using ``package::function`` syntax)
+        * base R
+
+        Parameters
+        ----------
+        func_name : str
+            Name of the R function to call. Package functions should be specified
+            as ``package::function``.
+
+        *args
+            Positional arguments passed to the R function.
+
+        **kwargs
+            Named arguments passed to the R function.
+
+        Returns
+        -------
+        object
+            The result of the R function, converted to a Python object.
+
+        Examples
+        --------
+        >>> rfc.call("sum", [1, 2, 3])
+        >>> rfc.call("dplyr::n_distinct", [1, 2, 2, 3])
+        >>> rfc.call("add_and_scale", 2, 3, scale=10)
+        """
+
         self._ensure_r_loaded()
 
         func = None

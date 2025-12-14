@@ -1,163 +1,151 @@
 API Reference
 =============
 
-Module: rpy_bridge
-------------------
+This page documents the public API of **rpy-bridge**.
+For almost all use cases, users only need to work with a single class:
+``RFunctionCaller``.
 
-This section provides a reference for all modules, classes, and functions in `rpy-bridge`.
-
-For practical usage examples, see :ref:`usage` or the `examples` directory:
+For practical examples, see :ref:`usage` or the examples directory:
 `rpy-bridge examples <https://github.com/vic-cheung/rpy-bridge/tree/main/examples>`_.
 
----
 
-## Module: rpy_bridge
+How it works internally
+-----------------------
 
-.. automodule:: rpy_bridge
-:members:
-:undoc-members:
-:show-inheritance:
+Internally, ``RFunctionCaller`` embeds an R session inside Python.
+Each sourced R script is loaded into its own isolated environment
+(namespace), preventing name collisions between scripts.
 
-This is the main package module. It provides top-level helpers and imports the core R interface.
+When ``call()`` is invoked:
 
-Key features:
+1. Python arguments are converted to R objects
+2. The requested R function is resolved (script, package, or base R)
+3. The function is executed inside the R session
+4. The return value is converted back into a Python object
 
-* Load and call R scripts and functions from Python.
-* Activate `renv` environments for isolated R projects.
-* Automatic conversion between R and Python data types.
-* Utilities for cleaning and aligning DataFrames.
+These details are abstracted away so users can focus on calling R functions
+without managing R sessions, environments, or type conversion manually.
 
----
 
-## Module: rpy_bridge.rpy2_utils
+Overview
+--------
 
-.. automodule:: rpy_bridge.rpy2_utils
-:members:
-:undoc-members:
-:show-inheritance:
+``RFunctionCaller`` provides a unified interface for:
 
-Key classes:
+* Loading one or more R scripts
+* Calling functions defined in those scripts
+* Calling base R and package functions
+* Inspecting available functions in loaded namespaces
+* Optionally activating a ``renv`` project
 
-* **RFunctionCaller** – Primary interface for calling R functions.
-* **NamespaceWrapper** – Wraps an R script namespace for Python attribute access.
+Typical usage looks like:
 
----
+.. code-block:: python
 
-## Class: RFunctionCaller
+    from rpy_bridge import RFunctionCaller
 
-.. autoclass:: rpy_bridge.rpy2_utils.RFunctionCaller
-:members:
-:undoc-members:
-:show-inheritance:
+    rfc = RFunctionCaller(scripts="my_script.R")
+    result = rfc.call("my_function", 1, 2)
 
-RFunctionCaller is the main class to interact with R scripts, packages, and functions.
 
-**Initialization:**
+RFunctionCaller
+---------------
 
-```python
-caller = RFunctionCaller(
-    path_to_renv: Path | None = None,
-    scripts: str | Path | list[str | Path] | None = None
-    packages: str | list[str] | None = None
-)
-```
+.. autoclass:: rpy_bridge.RFunctionCaller
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
-* **path_to_renv** – Optional path to an R project with `renv` for dependency isolation.
-* **scripts** – Path or list of `.R` files or directories to source.
-* **packages** – R packages to load (e.g., `['dplyr']`).
 
-**Core methods:**
+Initialization
+^^^^^^^^^^^^^^
 
-* **call(func_name, *args, **kwargs)**
-  Call an R function from a script, package, or the global environment. Handles automatic Python ↔ R conversion.
+.. code-block:: python
 
-  Examples:
+    rfc = RFunctionCaller(
+        path_to_renv=None,
+        scripts="my_script.R",
+        packages=["dplyr"],
+    )
 
-  ```python
-  caller.call("sum", [1, 2, 3])
-  caller.call("dplyr::mutate", df, new_col=1)
-  ```
+**Parameters**
 
-* **list_namespaces()** – Returns a list of all loaded script namespaces.
+* **path_to_renv**
+  Optional path to an R project that uses ``renv``. This may point either to
+  the project root or directly to the ``renv/`` directory.
 
-* **list_namespace_functions(namespace)** – Returns a list of callable functions in a specific namespace.
+* **scripts**
+  One or more R scripts or directories containing ``.R`` files. Scripts are
+  sourced and loaded into isolated namespaces.
 
-* **print_function_tree(include_packages=False, max_display=10)** – Pretty-prints available functions in scripts and optionally packages.
+* **packages**
+  Optional R packages to load (and install if missing), for example
+  ``["dplyr"]``.
 
-* **ensure_r_package(pkg)** – Ensures an R package is loaded (installs it if missing).
 
----
+Calling R Functions
+^^^^^^^^^^^^^^^^^^^
 
-## Class: NamespaceWrapper
+The primary method users will interact with is ``call``.
 
-.. autoclass:: rpy_bridge.rpy2_utils.NamespaceWrapper
-:members:
-:undoc-members:
+.. code-block:: python
 
-Returned by `RFunctionCaller.<namespace>`. Provides attribute access to R functions in that namespace.
+    # Base R
+    rfc.call("sum", [1, 2, 3])
 
-* **list_functions()** – List all callable functions in the namespace.
+    # Package function
+    rfc.call("dplyr::n_distinct", [1, 2, 2, 3])
 
-Example:
+    # Function from a sourced R script
+    rfc.call("add_and_scale", 2, 3, scale=10)
 
-```python
-caller.toy_funcs.list_functions()
-caller.toy_funcs.add_and_scale(2, 3)
-```
 
----
+Inspecting Loaded Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-## Function: activate_renv
+When working with larger scripts or multiple namespaces, it is often useful
+to inspect what functions are available.
 
-.. autofunction:: rpy_bridge.rpy2_utils.activate_renv
+.. code-block:: python
 
-Activates an R `renv` environment for dependency isolation.
+    rfc.list_namespaces()
+    rfc.print_function_tree()
 
-Args:
 
-* **path_to_renv** – Path to R project containing `renv/activate.R` and `renv.lock`.
+Accessing Script Namespaces (Advanced)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
----
+Each sourced R script is loaded into its own namespace and can be accessed
+as an attribute on the ``RFunctionCaller`` instance.
 
-## Advanced R ↔ Python conversion utilities
+.. code-block:: python
 
-* **_py2r(obj)** – Convert Python objects (scalars, lists, dicts, pandas DataFrames) to R objects.
-* **_r2py(obj)** – Convert R objects (vectors, lists, DataFrames) to Python equivalents.
-* **clean_r_missing(obj, caller)** – Recursively convert R missing values (`NA`) to Python `None` or `pd.NA`.
-* **r_namedlist_to_dict(namedlist, caller, top_level=False)** – Convert R NamedList or ListVector to Python dict or list.
-* **postprocess_r_dataframe(df)** – Fix dtypes, normalize, and clean DataFrame imported from R.
+    rfc.my_script.add_and_scale(2, 3)
+    rfc.my_script.list_functions()
 
----
+This is optional syntactic sugar; all functions can always be called via
+``rfc.call(...)``.
 
-## DataFrame comparison and alignment utilities
 
-* **compare_r_py_dataframes(df1, df2, float_tol=1e-8)**
-  Compare Python and R DataFrames for numeric and non-numeric differences. Returns a dictionary with mismatches.
+Notes and Best Practices
+------------------------
 
-* **normalize_dtypes(df1, df2)** – Align dtypes between two DataFrames.
+* Base R functions can be called directly (e.g. ``"sum"``, ``"mean"``).
+* Package functions should use ``package::function`` syntax.
+* Missing values (``None``, ``pd.NA``) are mapped to R ``NA`` automatically.
+* Empty vectors, mixed types, and lists of DataFrames are supported.
+* For most workflows, users should rely on ``call()`` and
+  ``print_function_tree()`` exclusively.
 
-* **align_numeric_dtypes(df1, df2)** – Convert numeric-like object columns to float64 for comparison.
 
----
+Examples
+--------
 
-## Tips and Notes
+The following example scripts demonstrate real-world usage:
 
-* Base R functions can be called directly: `caller.call("sum", [1,2,3])`.
-* Package functions can be called with `::`: `caller.call("dplyr::mutate", df, new_col=1)`.
-* Automatic handling of `None` / `pd.NA` → `NA` in R.
-* Edge cases (empty vectors, mixed types, lists of DataFrames) are supported.
-* All function calls are logged; check `logger` for debug info.
+* ``examples/basic_usage.py`` – Minimal usage patterns
+* ``examples/advanced_usage.py`` – Multiple scripts, packages, edge cases
+* ``examples/renv_usage.py`` – Using project-specific ``renv`` environments
 
----
-
-## Examples
-
-* `examples/advanced_usage.py` demonstrates:
-
-  * Calling multiple scripts
-  * Custom R functions
-  * Base R and package functions
-  * Python-to-R type conversion
-  * Handling lists of DataFrames and edge cases
-
-  `View examples on GitHub <https://github.com/vic-cheung/rpy-bridge/tree/main/examples>`_.
+View all examples on GitHub:
+`https://github.com/vic-cheung/rpy-bridge/tree/main/examples <https://github.com/vic-cheung/rpy-bridge/tree/main/examples>`_
