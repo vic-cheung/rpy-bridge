@@ -29,7 +29,7 @@ jobs:
         run: |
           uv venv .venv
           # Install all necessary extras: r (for rpy2), dev, and docs
-          uv sync --extra all
+          uv sync --all-extras
 
       - name: Run tests
         run: uv run pytest -q
