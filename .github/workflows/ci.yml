@@ -25,10 +25,11 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Create venv and sync
+      - name: Create venv and sync dependencies
         run: |
           uv venv .venv
-          uv sync --all-extras
+          # Install all necessary extras: r (for rpy2), dev, and docs
+          uv sync --extra all
 
       - name: Run tests
         run: uv run pytest -q

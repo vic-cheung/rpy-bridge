@@ -1,6 +1,6 @@
 [project]
 name = "rpy-bridge"
-version = "0.5.0"
+version = "0.5.1"
 description = "Python-to-R interoperability engine with environment management, type-safe conversions, data normalization, and safe R function execution."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -41,11 +41,6 @@ classifiers = [
 
 ]
 
-[project.optional-dependencies]
-r = ["rpy2>=3.5"]
-dev = ["ipykernel>=7.1.0"]
-docs = ["sphinx", "myst-parser"]
-
 [project.urls]
 Homepage = "https://github.com/vic-cheung/rpy-bridge"
 "Issue Tracker" = "https://github.com/vic-cheung/rpy-bridge/issues"
@@ -57,15 +52,14 @@ build-backend = "setuptools.build_meta"
 # -------------------------------
 # uv dev dependencies
 # -------------------------------
+[project.optional-dependencies]
+r = ["rpy2>=3.5"]
+dev = ["ipykernel>=7.1.0", "pytest>=8.0", "ruff>=0.6", "build>=1.0", "twine>=4.0", "certifi>=2025.0", "ty>=0.0.1a34"]
+docs = ["sphinx", "myst-parser"]
+
 [tool.uv]
-dev-dependencies = [
-    "ruff>=0.6",
-    "pytest>=8.0",
-    "build>=1.0",
-    "twine>=4.0",
-    "certifi>=2025.0",
-    "ty>=0.0.1a34",
-]
+# Define a meta-extra that combines all extras in one
+all = ["r", "dev", "docs"]
 
 # -------------------------------
 # Ruff configuration
