@@ -1,9 +1,9 @@
 rpy-bridge Usage
 ================
 
-rpy-bridge provides a Python interface to R scripts, R functions, and R environments with
-automatic conversion between Python and R data types. This page shows how to get started
-and highlights common usage patterns.
+rpy-bridge is a Python-controlled R execution orchestrator (not a thin rpy2 wrapper).
+It handles headless-safe R startup, project-root inference, out-of-tree ``renv`` activation,
+isolated script namespaces, and Python↔R conversion with dtype/NA normalization.
 
 ---
 
@@ -15,8 +15,8 @@ Installation
 
 **Prerequisites**
 
-- System R installed and available on `PATH` (rpy2 requires a working R installation).
-- Python 3.12+
+- System R installed and available on ``PATH`` (rpy2 requires a working R installation).
+- Python 3.11+ (tested on 3.11–3.12)
 
 **From PyPI:**
 
@@ -24,7 +24,7 @@ Installation
 
     python3 -m pip install rpy-bridge rpy2
 
-**Using UV package manager:**
+**Using uv package manager:**
 
 .. code-block:: bash
 
@@ -33,14 +33,37 @@ Installation
 
 ---
 
-Basic Usage Examples
+Quickstart examples
 -------------------
 
-For full working examples, see the `examples/basic_usage.py` script:
+Call a package function (no scripts):
+
+.. code-block:: python
+
+    from rpy_bridge import RFunctionCaller
+
+    rfc = RFunctionCaller()
+    samples = rfc.call("stats::rnorm", 5, mean=0, sd=1)
+    median_val = rfc.call("stats::median", samples)
+
+Call a script function with ``renv`` activation (out-of-tree allowed):
+
+.. code-block:: python
+
+    from pathlib import Path
+    from rpy_bridge import RFunctionCaller
+
+    project = Path("/path/to/project")
+    script = project / "scripts" / "example.R"
+
+    rfc = RFunctionCaller(path_to_renv=project, scripts=script)
+    result = rfc.call("some_function", 42, named_arg="value")
+
+See the full working examples in ``examples/basic_usage.py``:
 
 .. literalinclude:: ../examples/basic_usage.py
-   :language: python
-   :linenos:
+    :language: python
+    :linenos:
 
 ---
 
@@ -132,19 +155,32 @@ Troubleshooting
 R Not Found
 -----------
 
-- Ensure R is installed and in PATH
+- Ensure R is installed and on PATH
+- Set ``R_HOME`` explicitly if R is installed in a non-default location
 
 Function Not Found
 ------------------
 
 - Check that the script has been loaded
-- Use `list_namespaces()` and `list_namespace_functions()` to inspect
+- Use ``list_namespaces()`` and ``list_namespace_functions()`` to inspect
+- For package functions, use ``package::function`` syntax
 
 Data Conversion Issues
 ---------------------
 
-- Missing values in R map to `None` or ``pd.NA``
-- Use `clean_r_dataframe()` or `fix_r_dataframe_types()` as needed
+- Missing values in R map to ``None`` or ``pd.NA``
+- Use ``clean_r_dataframe()`` or ``fix_r_dataframe_types()`` as needed
+- For dtype alignment, see ``normalize_dtypes`` / ``compare_r_py_dataframes``
+
+CI and headless tips
+--------------------
+- Headless defaults are applied automatically; avoid GUI probing in CI
+- To skip ``renv`` when R is absent in CI, set ``RPY_BRIDGE_SKIP_RENV=1``
+
+Logging
+-------
+- Logs emit through loguru (fallback to stdlib) with a dedicated ``[RFunctionCaller]`` sink
+- Adjust log level globally via loguru/stdlib configuration in your app
 
 ---
 

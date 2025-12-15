@@ -1,16 +1,10 @@
 # rpy-bridge
 
-**rpy-bridge** is a Python-controlled **R execution orchestrator** that enables
-Python code to run R functions, scripts, and packages with **reproducible
-filesystem and environment semantics**.
-
-It is built on top of `rpy2`, but unlike thin wrappers, rpy-bridge stabilizes how
-R code is executed when invoked from Python: project roots are inferred, `renv`
-environments can be activated out-of-tree, relative paths behave as expected,
-and return values are normalized for safe Python consumption.
-
-This makes rpy-bridge suitable for production pipelines, CI, and bilingual
-Python/R teams where R code must run reliably outside an interactive R session.
+**rpy-bridge** is a Python-controlled **R execution orchestrator** (not a thin
+rpy2 wrapper). It delivers deterministic, headless-safe R startup; project-root
+inference; out-of-tree `renv` activation; isolated script namespaces; and robust
+Python↔R conversions with dtype/NA normalization. Use it when you need
+reproducible R execution from Python in production pipelines and CI.
 
 **Latest release:** [`rpy-bridge` on PyPI](https://pypi.org/project/rpy-bridge/)
 
@@ -18,20 +12,40 @@ Python/R teams where R code must run reliably outside an interactive R session.
 
 ## What this is (and is not)
 
-rpy-bridge **is not a thin rpy2 wrapper**.
+rpy-bridge **is not a thin rpy2 wrapper**. Key differences:
 
-Typical rpy2 usage assumes:
-- the Python working directory is the R project root
-- `renv` lives next to the executing script
-- relative paths resolve correctly by default
-- all R code executes in `globalenv()`
-
-These assumptions break quickly in real-world Python workflows.
-
-rpy-bridge instead provides a **controlled R runtime** with explicit guarantees
-around execution context, filesystem behavior, and environment activation.
+- Infers R project roots via markers (`.git`, `.Rproj`, `renv.lock`, `DESCRIPTION`, `.here`)
+- Activates `renv` even when it lives outside the calling directory
+- Executes from the inferred project root so relative paths behave as R expects
+- Runs headless by default (no GUI probing), isolates scripts from `globalenv()`
+- Normalizes return values for Python (NAs, dtypes, data.frames) and offers comparison helpers
 
 ---
+
+## Quickstart
+
+Call a package function (no scripts):
+
+```python
+from rpy_bridge import RFunctionCaller
+
+rfc = RFunctionCaller()
+samples = rfc.call("stats::rnorm", 5, mean=0, sd=1)
+median_val = rfc.call("stats::median", samples)
+```
+
+Call a function from a local script with `renv` (out-of-tree allowed):
+
+```python
+from pathlib import Path
+from rpy_bridge import RFunctionCaller
+
+project_dir = Path("/path/to/your-r-project")
+script = project_dir / "scripts" / "example.R"
+
+rfc = RFunctionCaller(path_to_renv=project_dir, scripts=script)
+result = rfc.call("some_function", 42, named_arg="value")
+```
 
 ## Core capabilities
 
@@ -102,7 +116,7 @@ reproducibility and avoid side effects during execution.
 ### Prerequisites
 
 - System R installed and available on `PATH`
-- Python 3.12+
+- Python 3.11+ (tested on 3.11–3.12)
 
 ### From PyPI
 
@@ -140,33 +154,7 @@ uv sync
 
 ## Usage
 
-### Call a function from a local R script
-
-```python
-from pathlib import Path
-from rpy_bridge import RFunctionCaller
-
-project_dir = Path("/path/to/your-r-project")
-script = project_dir / "scripts" / "example.R"
-
-caller = RFunctionCaller(
-    path_to_renv=project_dir,
-    script_path=script,
-)
-
-result = caller.call("some_function", 42, named_arg="value")
-```
-
-### Call base R functions (no local script)
-
-```python
-from rpy_bridge import RFunctionCaller
-
-caller = RFunctionCaller(path_to_renv=None)
-
-samples = caller.call("stats::rnorm", 10, mean=0, sd=1)
-median_val = caller.call("stats::median", samples)
-```
+See Quickstart above and examples in `examples/basic_usage.py`.
 
 ---
 
