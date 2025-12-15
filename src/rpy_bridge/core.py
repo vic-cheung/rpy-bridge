@@ -24,7 +24,9 @@ from .rpy2_loader import ensure_rpy2
 
 
 class NamespaceWrapper:
-    """Wrap an R script namespace for Python attribute access."""
+    """
+    Wrap an R script namespace for Python attribute access.
+    """
 
     def __init__(self, env):
         self._env = env

@@ -14,7 +14,9 @@ from .rpy2_loader import ensure_rpy2
 
 
 def normalize_scripts(scripts: str | Path | list[str | Path] | None) -> list[Path]:
-    """Normalize script inputs to a list of resolved Paths."""
+    """
+    Normalize script inputs to a list of resolved Paths.
+    """
     if scripts is None:
         return []
     if isinstance(scripts, (str, Path)):

@@ -29,7 +29,9 @@ CI_TESTING = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("TESTI
 
 
 def ensure_rpy2_available() -> None:
-    """Raise with instructions if rpy2 is missing."""
+    """
+    Raise with instructions if rpy2 is missing.
+    """
     if importlib.util.find_spec("rpy2") is None:
         raise RuntimeError(
             "\n[Error] rpy2 is not installed. Please install it in your Python environment:\n"

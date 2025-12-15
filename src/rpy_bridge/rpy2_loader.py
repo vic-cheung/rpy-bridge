@@ -12,7 +12,9 @@ _RPY2: dict[str, Any] | None = None
 
 
 def _require_rpy2(raise_on_missing: bool = True) -> dict[str, Any] | None:
-    """Import rpy2 lazily and cache its key objects."""
+    """
+    Import rpy2 lazily and cache its key objects.
+    """
     global _RPY2
     if _RPY2 is not None:
         return _RPY2
@@ -56,7 +58,9 @@ def _require_rpy2(raise_on_missing: bool = True) -> dict[str, Any] | None:
 
 
 def ensure_rpy2() -> dict[str, Any]:
-    """Return the cached rpy2 bundle, raising if unavailable."""
+    """
+    Return the cached rpy2 bundle, raising if unavailable.
+    """
     global _RPY2
     if _RPY2 is None:
         _RPY2 = _require_rpy2()
