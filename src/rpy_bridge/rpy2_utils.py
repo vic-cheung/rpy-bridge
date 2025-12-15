@@ -244,25 +244,96 @@ def _ensure_rpy2() -> dict:
 
 
 # ---------------------------------------------------------------------
+# Project root discovery (for this.path / working dir)
+# ---------------------------------------------------------------------
+def _candidate_project_dirs(base: Path, depth: int = 3) -> list[Path]:
+    return [base] + list(base.parents)[:depth]
+
+
+def _has_root_marker(path: Path) -> bool:
+    if (path / ".git").exists():
+        return True
+    if any(path.glob("*.Rproj")):
+        return True
+    if (path / ".here").exists():
+        return True
+    if (path / "DESCRIPTION").exists():
+        return True
+    if (path / "renv.lock").exists():
+        return True
+    return False
+
+
+def _find_project_root(path_to_renv: Path | None, scripts: list[Path]) -> Path | None:
+    # Prefer roots discovered from script locations first; fall back to path_to_renv hints.
+    bases: list[Path] = []
+    if scripts:
+        bases.extend(_candidate_project_dirs(scripts[0].parent))
+    if path_to_renv is not None:
+        bases.extend(_candidate_project_dirs(path_to_renv))
+
+    seen = set()
+    for cand in bases:
+        c = cand.resolve()
+        if c in seen:
+            continue
+        seen.add(c)
+        if _has_root_marker(c):
+            return c
+    return None
+
+
+# ---------------------------------------------------------------------
 # Activate renv
 # ---------------------------------------------------------------------
 def activate_renv(path_to_renv: Path) -> None:
     r = _ensure_rpy2()
     robjects = r["robjects"]
 
+    # Normalize and allow flexible layouts. Users may pass:
+    # - the project root (with renv.lock and renv/)
+    # - the renv directory itself
+    # - a script dir that sits beside or inside the project; we search upwards.
     path_to_renv = path_to_renv.resolve()
-    if path_to_renv.name == "renv" and (path_to_renv / "activate.R").exists():
-        renv_dir = path_to_renv
-        project_dir = path_to_renv.parent
-    else:
-        renv_dir = path_to_renv / "renv"
-        project_dir = path_to_renv
 
-    renv_activate = renv_dir / "activate.R"
-    renv_lock = project_dir / "renv.lock"
+    def _candidates(base: Path) -> list[Path]:
+        # Search base, then parents up to 3 levels for renv assets
+        parents = [base] + list(base.parents)[:3]
+        return parents
 
-    if not renv_activate.exists() or not renv_lock.exists():
-        raise FileNotFoundError(f"[Error] renv environment incomplete: {path_to_renv}")
+    project_dir = None
+    renv_dir = None
+    renv_activate = None
+    renv_lock = None
+
+    for cand in _candidates(path_to_renv):
+        # If the candidate *is* a renv dir with activate.R, treat its parent as project
+        cand_is_renv = cand.name == "renv" and (cand / "activate.R").exists()
+        if cand_is_renv:
+            rd = cand
+            pd = cand.parent
+        else:
+            rd = cand / "renv"
+            pd = cand
+
+        activate_path = rd / "activate.R"
+        lock_path = pd / "renv.lock"
+        if not lock_path.exists():
+            alt_lock = rd / "renv.lock"
+            if alt_lock.exists():
+                lock_path = alt_lock
+
+        if activate_path.exists() and lock_path.exists():
+            project_dir = pd
+            renv_dir = rd
+            renv_activate = activate_path
+            renv_lock = lock_path
+            break
+
+    if renv_dir is None or renv_activate is None or renv_lock is None:
+        raise FileNotFoundError(
+            f"[Error] renv environment incomplete: activate.R or renv.lock not found near {path_to_renv}"
+        )
 
     renviron_file = project_dir / ".Renviron"
     if renviron_file.is_file():
@@ -271,9 +342,22 @@ def activate_renv(path_to_renv: Path) -> None:
 
     rprofile_file = project_dir / ".Rprofile"
     if rprofile_file.is_file():
-        robjects.r(f'source("{rprofile_file.as_posix()}")')
-        logger.info(f"[rpy-bridge] .Rprofile sourced: {rprofile_file}")
+        # Source .Rprofile from the project root so any relative paths (e.g. renv/activate.R)
+        # are resolved correctly even when the current R working directory is elsewhere.
+        try:
+            robjects.r(
+                f'old_wd <- getwd(); setwd("{project_dir.as_posix()}"); '
+                f"on.exit(setwd(old_wd), add = TRUE); "
+                f'source("{rprofile_file.as_posix()}")'
+            )
+            logger.info(f"[rpy-bridge] .Rprofile sourced: {rprofile_file}")
+        except Exception as e:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "[rpy-bridge] Failed to source .Rprofile; falling back to renv::activate(): %s",
+                e,
+            )
 
+    # If .Rprofile was absent or failed, ensure renv is loaded directly.
     try:
         robjects.r("suppressMessages(library(renv))")
     except Exception:
@@ -283,6 +367,7 @@ def activate_renv(path_to_renv: Path) -> None:
         )
         robjects.r("library(renv)")
 
+    # Activate renv explicitly in case .Rprofile did not already do it (or failed).
     robjects.r(f'renv::load("{project_dir.as_posix()}")')
     logger.info(f"[rpy-bridge] renv environment loaded for project: {project_dir}")
 
@@ -394,6 +479,7 @@ class RFunctionCaller:
 
         self.path_to_renv = path_to_renv.resolve() if path_to_renv else None
         self._namespaces: dict[str, Any] = {}
+        self._namespace_roots: dict[str, Path] = {}
 
         # Normalize scripts to a list
         if scripts is None:
@@ -508,6 +594,23 @@ class RFunctionCaller:
 
         r = self.robjects.r
 
+        # Configure this.path to avoid GUI detection errors in embedded/headless R (e.g., rpy2)
+        try:
+            r('options(this.path.gui = "httpd")')
+            r("options(this.path.verbose = FALSE)")
+            # Patch this.path::.gui_path to avoid GUI detection errors in headless/rpy2 contexts.
+            r(
+                """
+                if (requireNamespace("this.path", quietly = TRUE)) {
+                  try({
+                    assignInNamespace(".gui_path", function(...) "httpd", ns = "this.path")
+                  }, silent = TRUE)
+                }
+                """
+            )
+        except Exception:
+            pass
+
         # Ensure required R package
         self.ensure_r_package("withr")
 
@@ -543,11 +646,18 @@ class RFunctionCaller:
                 r("env <- new.env(parent=globalenv())")
                 r(f'script_path <- "{script_path.as_posix()}"')
 
+                # Determine a root for this script: prefer a discovered project root; else script dir.
+                script_root = _find_project_root(self.path_to_renv, [script_path])
+                # Prefer script-local roots; if none, fall back to script directory.
+                if script_root is None:
+                    script_root = script_path.parent.resolve()
+                script_root_arg = f'"{script_root.as_posix()}"'
+
                 r(
-                    """
+                    f"""
                     withr::with_dir(
-                        dirname(script_path),
-                        sys.source(basename(script_path), envir=env)
+                        {script_root_arg},
+                        sys.source(script_path, envir=env, chdir = TRUE)
                     )
                     """
                 )
@@ -556,6 +666,7 @@ class RFunctionCaller:
                 self._namespaces[ns_name] = {
                     name: env_obj[name] for name in env_obj.keys() if callable(env_obj[name])
                 }
+                self._namespace_roots[ns_name] = script_root
 
                 logger.info(
                     f"[rpy-bridge.RFunctionCaller] Registered {len(self._namespaces[ns_name])} functions in namespace '{ns_name}'"
@@ -847,6 +958,7 @@ class RFunctionCaller:
                 if fname in ns_env:
                     func = ns_env[fname]
                     source_info = f"script namespace '{ns_name}'"
+                    namespace_root = self._namespace_roots.get(ns_name)
                 else:
                     raise ValueError(
                         f"Function '{fname}' not found in R script namespace '{ns_name}'"
@@ -863,6 +975,7 @@ class RFunctionCaller:
                 if func_name in ns_env:
                     func = ns_env[func_name]
                     source_info = f"script namespace '{ns_name}'"
+                    namespace_root = self._namespace_roots.get(ns_name)
                     break
 
             if func is None:
@@ -885,7 +998,18 @@ class RFunctionCaller:
         r_kwargs = {k: self._py2r(v) for k, v in kwargs.items()}
 
         try:
-            result = func(*r_args, **r_kwargs)
+            if source_info and source_info.startswith("script namespace") and namespace_root:
+                r = self.robjects.r
+                try:
+                    r(f'old_wd <- getwd(); setwd("{namespace_root.as_posix()}")')
+                    result = func(*r_args, **r_kwargs)
+                finally:
+                    try:
+                        r("setwd(old_wd)")
+                    except Exception:
+                        pass
+            else:
+                result = func(*r_args, **r_kwargs)
         except Exception as e:
             raise RuntimeError(
                 f"Error calling R function '{func_name}' from {source_info}: {e}"
