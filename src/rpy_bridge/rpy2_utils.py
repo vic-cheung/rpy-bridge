@@ -146,18 +146,14 @@ def find_r_home() -> str | None:
 
 
 # Determine if we're running in CI / testing
-CI_TESTING = (
-    os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("TESTING") == "1"
-)
+CI_TESTING = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("TESTING") == "1"
 
 R_HOME = os.environ.get("R_HOME")
 if not R_HOME:
     R_HOME = find_r_home()
     if not R_HOME:
         if CI_TESTING:
-            logger.warning(
-                "R not found; skipping all R-dependent setup in CI/testing environment."
-            )
+            logger.warning("R not found; skipping all R-dependent setup in CI/testing environment.")
             R_HOME = None  # Explicitly None to signal "no R available"
         else:
             raise RuntimeError("R not found. Please install R or add it to PATH.")
@@ -174,7 +170,7 @@ if R_HOME:
         lib_path = os.path.join(R_HOME, "lib")
         if lib_path not in os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", ""):
             os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = (
-                f"{lib_path}:{os.environ.get('DYLD_FALLBACK_LIBRARY_PATH','')}"
+                f"{lib_path}:{os.environ.get('DYLD_FALLBACK_LIBRARY_PATH', '')}"
             )
 
     elif sys.platform.startswith("linux"):
@@ -358,7 +354,6 @@ class RFunctionCaller:
         packages: str | list[str] | None = None,
         **kwargs,  # catch unexpected keywords
     ):
-
         # Handle path_to_renv safely
         if path_to_renv is not None:
             if not isinstance(path_to_renv, Path):
@@ -380,9 +375,7 @@ class RFunctionCaller:
                 scripts = script_path_value
             else:
                 # Both provided → prioritize scripts and ignore script_path
-                logger.warning(
-                    "'script_path' ignored because 'scripts' argument is also provided."
-                )
+                logger.warning("'script_path' ignored because 'scripts' argument is also provided.")
 
         self.scripts = _normalize_scripts(scripts)
 
@@ -457,6 +450,17 @@ class RFunctionCaller:
             self.ListVector = rpy2_dict["ListVector"]
             self.NamedList = rpy2_dict["NamedList"]
 
+        # Activate renv once if requested
+        if self.path_to_renv and not self._renv_activated:
+            try:
+                activate_renv(self.path_to_renv)
+                self._renv_activated = True
+                logger.info(
+                    f"[rpy-bridge.RFunctionCaller] renv activated for project: {self.path_to_renv}"
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to activate renv at {self.path_to_renv}: {e}") from e
+
         r = self.robjects.r
 
         # Ensure required R package
@@ -505,9 +509,7 @@ class RFunctionCaller:
 
                 env_obj = r("env")
                 self._namespaces[ns_name] = {
-                    name: env_obj[name]
-                    for name in env_obj.keys()
-                    if callable(env_obj[name])
+                    name: env_obj[name] for name in env_obj.keys() if callable(env_obj[name])
                 }
 
                 logger.info(
@@ -588,9 +590,7 @@ class RFunctionCaller:
             logger.warning(f"Failed to list functions for package '{pkg}'")
             return []
 
-    def list_all_functions(
-        self, include_packages: bool = False
-    ) -> dict[str, list[str]]:
+    def list_all_functions(self, include_packages: bool = False) -> dict[str, list[str]]:
         """
         Return all callable R functions grouped by script namespace and package.
         """
@@ -620,9 +620,7 @@ class RFunctionCaller:
 
         return all_funcs
 
-    def print_function_tree(
-        self, include_packages: bool = False, max_display: int = 10
-    ):
+    def print_function_tree(self, include_packages: bool = False, max_display: int = 10):
         """
         Pretty-print available R functions grouped by namespace.
 
@@ -695,17 +693,11 @@ class RFunctionCaller:
 
                 types = set(type(x) for x in obj if not is_na(x))
                 if types <= {int, float}:
-                    return FloatVector(
-                        [robjects.NA_Real if is_na(x) else float(x) for x in obj]
-                    )
+                    return FloatVector([robjects.NA_Real if is_na(x) else float(x) for x in obj])
                 if types <= {bool}:
-                    return BoolVector(
-                        [robjects.NA_Logical if is_na(x) else x for x in obj]
-                    )
+                    return BoolVector([robjects.NA_Logical if is_na(x) else x for x in obj])
                 if types <= {str}:
-                    return StrVector(
-                        [robjects.NA_Character if is_na(x) else x for x in obj]
-                    )
+                    return StrVector([robjects.NA_Character if is_na(x) else x for x in obj])
                 return ListVector({str(i): self._py2r(v) for i, v in enumerate(obj)})
             if isinstance(obj, dict):
                 return ListVector({k: self._py2r(v) for k, v in obj.items()})
@@ -758,9 +750,7 @@ class RFunctionCaller:
             r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
         except Exception:
             logger.info(f"[rpy-bridge.RFunctionCaller] Package '{pkg}' not found.")
-            logger.warning(
-                f"[rpy-bridge.RFunctionCaller] Installing missing R package: {pkg}"
-            )
+            logger.warning(f"[rpy-bridge.RFunctionCaller] Installing missing R package: {pkg}")
             r(f'install.packages("{pkg}", repos="https://cloud.r-project.org")')
             r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
 
@@ -821,9 +811,7 @@ class RFunctionCaller:
                     func = self.robjects.r(f"{ns_name}::{fname}")
                     source_info = f"R package '{ns_name}'"
                 except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to resolve R function '{func_name}': {e}"
-                    ) from e
+                    raise RuntimeError(f"Failed to resolve R function '{func_name}': {e}") from e
 
         else:
             for ns_name, ns_env in self._namespaces.items():
@@ -927,9 +915,7 @@ def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
             values = series.dropna()
             if not values.empty and values.between(10000, 40000).all():
                 try:
-                    df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(
-                        series, unit="D"
-                    )
+                    df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(series, unit="D")
                 except Exception:
                     pass
         if pd.api.types.is_datetime64tz_dtype(series):
@@ -975,20 +961,14 @@ def clean_r_missing(obj, caller: RFunctionCaller):
 # ---------------------------------------------------------------------
 # DataFrame comparison utilities
 # ---------------------------------------------------------------------
-def normalize_dtypes(
-    df1: pd.DataFrame, df2: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def normalize_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     for col in df1.columns.intersection(df2.columns):
         df1[col] = df1[col].replace("", pd.NA)
         df2[col] = df2[col].replace("", pd.NA)
         s1, s2 = df1[col], df2[col]
         dtype1, dtype2 = s1.dtype, s2.dtype
-        if (
-            pd.api.types.is_numeric_dtype(dtype1)
-            and pd.api.types.is_object_dtype(dtype2)
-        ) or (
-            pd.api.types.is_object_dtype(dtype1)
-            and pd.api.types.is_numeric_dtype(dtype2)
+        if (pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_object_dtype(dtype2)) or (
+            pd.api.types.is_object_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2)
         ):
             try:
                 df1[col] = pd.to_numeric(s1, errors="coerce")
@@ -996,9 +976,7 @@ def normalize_dtypes(
                 continue
             except Exception:
                 pass
-        if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(
-            dtype2
-        ):
+        if pd.api.types.is_numeric_dtype(dtype1) and pd.api.types.is_numeric_dtype(dtype2):
             df1[col] = df1[col].astype("float64")
             df2[col] = df2[col].astype("float64")
             continue
@@ -1008,9 +986,7 @@ def normalize_dtypes(
     return df1, df2
 
 
-def align_numeric_dtypes(
-    df1: pd.DataFrame, df2: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def align_numeric_dtypes(df1: pd.DataFrame, df2: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     for col in df1.columns.intersection(df2.columns):
         s1, s2 = df1[col].replace("", pd.NA), df2[col].replace("", pd.NA)
         try:
@@ -1026,9 +1002,7 @@ def align_numeric_dtypes(
     return df1, df2
 
 
-def compare_r_py_dataframes(
-    df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8
-) -> dict:
+def compare_r_py_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, float_tol: float = 1e-8) -> dict:
     results: dict[str, Any] = {
         "shape_mismatch": False,
         "columns_mismatch": False,
@@ -1055,9 +1029,7 @@ def compare_r_py_dataframes(
     df1_aligned, df2_aligned = df1.loc[:, common_cols], df2.loc[:, common_cols]
     for col in common_cols:
         col_py, col_r = df1_aligned[col], df2_aligned[col]
-        if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(
-            col_r
-        ):
+        if pd.api.types.is_numeric_dtype(col_py) and pd.api.types.is_numeric_dtype(col_r):
             col_py, col_r = col_py.align(col_r)
             close = np.isclose(
                 col_py.fillna(np.nan),
