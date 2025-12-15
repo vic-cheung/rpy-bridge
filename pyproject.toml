@@ -54,12 +54,18 @@ build-backend = "setuptools.build_meta"
 # -------------------------------
 [project.optional-dependencies]
 r = ["rpy2>=3.5"]
-dev = ["ipykernel>=7.1.0", "pytest>=8.0", "ruff>=0.6", "build>=1.0", "twine>=4.0", "certifi>=2025.0", "ty>=0.0.1a34"]
+dev = ["ipykernel>=7.1.0"]
 docs = ["sphinx", "myst-parser"]
 
 [tool.uv]
-# Define a meta-extra that combines all extras in one
-all = ["r", "dev", "docs"]
+dev-dependencies = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+    "build>=1.0",
+    "twine>=4.0",
+    "certifi>=2025.0",
+    "ty>=0.0.1a34",
+]
 
 # -------------------------------
 # Ruff configuration

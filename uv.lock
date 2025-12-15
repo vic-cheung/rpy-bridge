@@ -1268,13 +1268,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "build" },
-    { name = "certifi" },
     { name = "ipykernel" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "twine" },
-    { name = "ty" },
 ]
 docs = [
     { name = "myst-parser" },
@@ -1284,21 +1278,35 @@ r = [
     { name = "rpy2" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "build" },
+    { name = "certifi" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "twine" },
+    { name = "ty" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "build", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "certifi", marker = "extra == 'dev'", specifier = ">=2025.0" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=7.1.0" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "myst-parser", marker = "extra == 'docs'" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pandas", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "rpy2", marker = "extra == 'r'", specifier = ">=3.5" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "sphinx", marker = "extra == 'docs'" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1a34" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "build", specifier = ">=1.0" },
+    { name = "certifi", specifier = ">=2025.0" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "twine", specifier = ">=4.0" },
+    { name = "ty", specifier = ">=0.0.1a34" },
 ]
 
 [[package]]
