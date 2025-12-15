@@ -9,13 +9,30 @@ sys.path.insert(0, os.path.abspath("../src"))
 
 project = "rpy-bridge"
 author = "Victoria Cheung"
-release = "0.3.7"
+release = "0.5.0"
+
+html_title = "rpy-bridge: Python-to-R orchestrator (renv, headless, robust conversions)"
+html_short_title = "rpy-bridge orchestrator"
+html_baseurl = "https://rpy-bridge.readthedocs.io/en/stable/"
+html_theme_options = {
+    "display_version": True,
+    "analytics_id": "",
+}
+
+html_meta = {
+    "description": (
+        "rpy-bridge: Python-controlled R execution orchestrator with renv activation, "
+        "project-root inference, headless-safe startup, and robust Python↔R conversions. "
+        "Not a thin rpy2 wrapper—built for reproducible R from Python."
+    ),
+}
 
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.autosummary",
     "sphinx.ext.viewcode",
+    "sphinx_sitemap",
 ]
 
 autodoc_mock_imports = [
