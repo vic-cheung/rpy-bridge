@@ -1,87 +1,138 @@
 # rpy-bridge
 
-rpy-bridge is a Python-to-R a robust interoperability engine that combines environment management, type-safe conversions, data normalization, and safe function execution to make Python-R collaboration seamless.
+**rpy-bridge** is a Python-controlled **R execution orchestrator** that enables
+Python code to run R functions, scripts, and packages with **reproducible
+filesystem and environment semantics**.
 
-It enables Python developers to call R functions, scripts, and packages safely while preserving type fidelity and project-specific R environments. This is ideal for bilingual teams where R authors maintain core logic, and Python-centric users need reliable access without rewriting code.
+It is built on top of `rpy2`, but unlike thin wrappers, rpy-bridge stabilizes how
+R code is executed when invoked from Python: project roots are inferred, `renv`
+environments can be activated out-of-tree, relative paths behave as expected,
+and return values are normalized for safe Python consumption.
+
+This makes rpy-bridge suitable for production pipelines, CI, and bilingual
+Python/R teams where R code must run reliably outside an interactive R session.
 
 **Latest release:** [`rpy-bridge` on PyPI](https://pypi.org/project/rpy-bridge/)
 
 ---
 
-## Key layers and capabilities
+## What this is (and is not)
 
-### 1. Lazy and robust R integration
+rpy-bridge **is not a thin rpy2 wrapper**.
 
-- Automatically detects or sets R_HOME and ensures rpy2 is installed.
-- Configures platform-specific dynamic library paths for macOS/Linux.
+Typical rpy2 usage assumes:
+- the Python working directory is the R project root
+- `renv` lives next to the executing script
+- relative paths resolve correctly by default
+- all R code executes in `globalenv()`
 
-### 2. Environment management
+These assumptions break quickly in real-world Python workflows.
 
-- Activates renv projects and loads project-specific libraries if it exists, otherwise use current environemnt.
-- Sources .Renviron and .Rprofile files to replicate the R project environment in Python.
+rpy-bridge instead provides a **controlled R runtime** with explicit guarantees
+around execution context, filesystem behavior, and environment activation.
 
-### 3. Python ↔ R type conversion
+---
 
-- Converts Python scalars, lists, dicts, and pandas DataFrames into appropriate R objects.
-- Converts R atomic vectors, ListVector/NamedList, and data.frames back into Python-native objects.
-- Handles nested structures, mixed types, and missing values robustly (NA_* → None/pd.NA).
+## Core capabilities
 
-### 4. Data hygiene and normalization
+### 1. R execution orchestration
 
-- Post-processes R DataFrames: fixes dtypes, numeric/date conversions, and timezone issues.
-- Normalizes and aligns column types for accurate Python comparisons.
-- Supports comparing Python and R DataFrames with mismatch diagnostics.
+- Embeds R via `rpy2` with deterministic startup behavior
+- Disables interactive and GUI-dependent hooks for headless execution
+- Loads R scripts into isolated namespaces (not `globalenv()`)
 
-### 5. Function calling
+### 2. Project root inference and path stability
 
-- Calls functions from R scripts, base R, or installed packages safely.
-- Automatically converts arguments and return values, including keyword arguments.
-- Supports mixed data types, nested structures, and DataFrames seamlessly.
+- Infers R project roots using markers such as:
+  `.git`, `.Rproj`, `renv.lock`, `DESCRIPTION`, `.here`
+- Executes R code from the inferred project root regardless of Python CWD
+- Preserves relative-path behavior expected by R scripts
+- Supports R code using `here::here()` or project-local data
 
-### 6. Python-first workflow for R code
+### 3. Out-of-tree `renv` activation
 
-- Enables Python developers to reuse R functions without needing deep R knowledge.
-- Keeps network, token, and SSL concerns outside the package when sourcing scripts locally.
-- Designed for reproducibility and safe execution in CI or cross-platform environments.
+- Activates `renv` projects located **outside** the calling Python directory
+- Sources `.Rprofile` and `.Renviron` to reproduce R startup semantics
+- Does not require R scripts and `renv` to live in the same directory
+
+### 4. Python ↔ R data conversion
+
+- Converts Python scalars, lists, dicts, and pandas objects into R equivalents
+- Converts R vectors, lists, and data.frames back into Python-native types
+- Handles nested structures, missing values, and mixed types robustly
+
+### 5. Data normalization and diagnostics
+
+- Post-processes R data.frames to fix dtype, timezone, and NA semantics
+- Normalizes column types for reliable Python-side comparison
+- Supports structured mismatch diagnostics between Python and R data
+
+### 6. Function invocation across scripts and packages
+
+- Calls functions defined in sourced R scripts, base R, or installed packages
+- Supports qualified function names (e.g. `stats::median`)
+- Executes functions within the active project and library context
+
+---
+
+## Calling base R functions and managing packages
+
+In addition to sourcing local R scripts, rpy-bridge supports calling functions
+from base R and installed packages directly from Python.
+
+Current support includes:
+
+- Calling base R functions without a local R script
+- Executing functions from installed R packages within the active environment
+
+Planned extensions (roadmap):
+
+- Programmatic installation of R packages into the active `renv` or system
+  environment when explicitly enabled
+- Declarative package requirements at the Python call site
+- Safe, opt-in package installation for CI and ephemeral environments
+
+Package installation is intentionally **not automatic by default** to preserve
+reproducibility and avoid side effects during execution.
 
 ---
 
 ## Installation
 
-**Prerequisites**
+### Prerequisites
 
-- System R installed and available on `PATH` (rpy2 requires a working R installation).
+- System R installed and available on `PATH`
 - Python 3.12+
 
-**From PyPI:**
+### From PyPI
 
-Install rpy-bridge with rpy2 for full R support
+Install rpy-bridge with rpy2 for full R support:
 
 ```bash
 python3 -m pip install rpy-bridge rpy2
 ```
 
-or using `uv`:
+Using `uv`:
 
 ```bash
 uv add rpy-bridge rpy2
 ```
 
-**During development (editable install):**
+### Development install
 
 ```bash
 python3 -m pip install -e .
 ```
 
-or using `uv`:
+or:
 
 ```bash
 uv sync
 ```
 
-**Required Python packages** (the installer will pull these in):
+### Required Python dependencies
 
-- `rpy2` (GPLv2 or later)
+- `rpy2`
 - `pandas`
 - `numpy`
 
@@ -89,44 +140,7 @@ uv sync
 
 ## Usage
 
-```python
-from pathlib import Path
-from rpy_bridge import RFunctionCaller
-
-rfc = RFunctionCaller(
-    path_to_renv=Path("/path/to/project"),
-    script=Path("/path/to/script.R"),
-)
-
-summary_df = rfc.call("summarize_cohort", cohort_df)
-```
-
----
-
-## Round-trip Python ↔ R behavior
-
-`rpy-bridge` attempts to convert Python objects to R and back. Most objects used in scientific/ML pipelines round-trip cleanly, but some heterogeneous Python structures may be wrapped or slightly altered. This is normal due to R's type system.
-
-| Python type                                    | Round-trip fidelity | Notes                                                                 |
-| ---------------------------------------------- | ------------------- | --------------------------------------------------------------------- |
-| `int`, `float`, `bool`, `str`                  | ✅ High              | Scalars convert directly                                              |
-| Homogeneous `list` of numbers/strings/booleans | ✅ High              | Converted to atomic R vectors                                         |
-| Nested lists of homogeneous types              | ✅ High              | Converted to nested R `ListVector`                                    |
-| `pandas.DataFrame` / `pd.Series`               | ✅ High              | Converted to `data.frame` / R vector, post-processed back             |
-| Mixed-type `list` or heterogeneous `dict`      | ⚠️ Partial          | Elements wrapped in single-element vectors; round-trip may alter type |
-| Python `None` / `pd.NA`                        | ✅ High              | Converted to R `NULL`                                                 |
-
-# Guidance
-
-- Typical workflows (DataFrames, numeric arrays, series, homogeneous lists) are fully supported.
-- Rare or highly heterogeneous Python objects may not round-trip perfectly.
-- Round-trip fidelity is mainly a “nice-to-have” for debugging. For production pipelines, it’s safe to focus on supported types.
-
----
-
-## Examples
-
-### Basic — run a local R script
+### Call a function from a local R script
 
 ```python
 from pathlib import Path
@@ -135,38 +149,56 @@ from rpy_bridge import RFunctionCaller
 project_dir = Path("/path/to/your-r-project")
 script = project_dir / "scripts" / "example.R"
 
-caller = RFunctionCaller(path_to_renv=project_dir, script_path=script)
+caller = RFunctionCaller(
+    path_to_renv=project_dir,
+    script_path=script,
+)
+
 result = caller.call("some_function", 42, named_arg="value")
-print(type(result))
 ```
 
-### Call installed R packages (no local script)
+### Call base R functions (no local script)
 
 ```python
 from rpy_bridge import RFunctionCaller
 
-caller = RFunctionCaller(path_to_renv=None, packages=["stats"])
-samples = caller.call("rnorm", 5, mean=10)
-print(type(samples))  # typically a numpy.ndarray
+caller = RFunctionCaller(path_to_renv=None)
 
+samples = caller.call("stats::rnorm", 10, mean=0, sd=1)
 median_val = caller.call("stats::median", samples)
-print(median_val)
 ```
 
 ---
 
-## R Setup
+## Round-trip Python ↔ R behavior
 
-If you plan to execute R code with `rpy-bridge`, use the helper scripts in
-`examples/r-deps/` to prepare an R environment.
+rpy-bridge attempts to convert Python objects to R and back. Most objects used in
+scientific and ML pipelines round-trip cleanly, but some heterogeneous Python
+structures may be wrapped or slightly altered due to differences in R’s type
+system.
 
-- On macOS (Homebrew) install system deps:
+| Python type                                    | Round-trip fidelity | Notes                                                                 |
+| ---------------------------------------------- | ------------------- | --------------------------------------------------------------------- |
+| `int`, `float`, `bool`, `str`                  | High                | Scalars convert directly                                              |
+| Homogeneous `list` of numbers/strings          | High                | Converted to atomic R vectors                                         |
+| Nested homogeneous lists                       | High                | Converted to nested R lists                                           |
+| `pandas.DataFrame` / `pd.Series`               | High                | Converted to `data.frame` and normalized on return                    |
+| Mixed-type `list` or `dict`                    | Partial             | May be wrapped in single-element vectors                              |
+| `None` / `pd.NA`                               | High                | Converted to R `NULL`                                                 |
+
+---
+
+## R setup helpers
+
+Helper scripts are provided in `examples/r-deps/` to prepare R environments.
+
+- Install system R dependencies (macOS / Homebrew):
 
 ```bash
 bash examples/r-deps/install_r_dev_deps_homebrew.sh
 ```
 
-- Initialize a project `renv` (run in an R session):
+- Initialize an `renv` project:
 
 ```r
 source("examples/r-deps/setup_env.R")
@@ -180,20 +212,28 @@ renv::restore()
 
 ---
 
-## Collaboration note
+## Who this is for
 
-This repository provides example R setup scripts for teams working across Python and R. Each project may require different R packages — check the package list in `examples/r-deps/setup_env.R` and commit a `renv.lock` for project-specific reproducibility.
+rpy-bridge is designed for:
 
-Clone repositories containing R scripts locally or use your preferred tooling to obtain scripts before execution.
+- Python-first pipelines that rely on mature R code
+- Teams where R logic must remain authoritative
+- CI or production systems that cannot rely on interactive R sessions
+- Multi-repo or multi-directory projects with non-trivial filesystem layouts
+
+It is **not** intended as a convenience wrapper for exploratory R usage.
 
 ---
 
 ## Licensing
 
-- `rpy-bridge` is released under the MIT License © 2025 Victoria Cheung.
-- The project depends on [`rpy2`](https://rpy2.github.io) which is licensed under the GNU General Public License v2 (or later).
+- rpy-bridge is released under the MIT License © 2025 Victoria Cheung
+- Depends on [`rpy2`](https://rpy2.github.io), licensed under the GNU GPL (v2 or later)
 
-### Thanks
+---
 
-This package was spun out of internal tooling at Revolution Medicines.
-Many thanks to the team there for allowing the code to be open sourced.
+## Acknowledgements
+
+This package was spun out of internal tooling I wrote at Revolution Medicines.
+Thanks to the team there for supporting its open-source release.
+"""
