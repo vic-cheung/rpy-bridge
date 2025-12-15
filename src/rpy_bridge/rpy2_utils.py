@@ -230,7 +230,7 @@ def _require_rpy2(raise_on_missing: bool = True) -> dict | None:
     except ImportError as e:
         if raise_on_missing:
             raise RuntimeError(
-                "R support requires optional dependency `rpy2`. Install with: pip install rpy-bridge[r]"
+                "R support requires rpy2; install it in your Python env (e.g., pip install rpy2)"
             ) from e
         return None
 
