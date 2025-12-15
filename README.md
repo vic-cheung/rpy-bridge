@@ -236,4 +236,3 @@ It is **not** intended as a convenience wrapper for exploratory R usage.
 
 This package was spun out of internal tooling I wrote at Revolution Medicines.
 Thanks to the team there for supporting its open-source release.
-"""
