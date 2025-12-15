@@ -352,6 +352,8 @@ class RFunctionCaller:
         path_to_renv: str | Path | None = None,
         scripts: str | Path | list[str | Path] | None = None,
         packages: str | list[str] | None = None,
+        headless: bool = True,
+        skip_renv_if_no_r: bool = True,
         **kwargs,  # catch unexpected keywords
     ):
         # Handle path_to_renv safely
@@ -409,6 +411,10 @@ class RFunctionCaller:
         else:
             self.packages = packages
 
+        # Headless mode guards (avoid GUI probing in non-interactive runs)
+        self.headless = headless
+        self.skip_renv_if_no_r = skip_renv_if_no_r
+
         # Lazy-loaded attributes
         self._r = None
         self.ro = None
@@ -427,6 +433,42 @@ class RFunctionCaller:
         self._packages_loaded = False
         self._scripts_loaded = [False] * len(self.scripts)
 
+    def _should_activate_renv(self) -> bool:
+        """Determine if renv activation should run, honoring CI/override knobs."""
+        if not self.path_to_renv:
+            return False
+
+        # Explicit opt-out (e.g., CI jobs that only run pure-Python tests)
+        if os.environ.get("RPY_BRIDGE_SKIP_RENV") in {"1", "true", "TRUE"}:
+            logger.info("[rpy-bridge] Skipping renv activation: RPY_BRIDGE_SKIP_RENV set")
+            return False
+
+        # CI without R available: skip if allowed
+        if CI_TESTING and R_HOME is None and self.skip_renv_if_no_r:
+            logger.info("[rpy-bridge] Skipping renv activation in CI: R_HOME not detected")
+            return False
+
+        # Require R_HOME in non-CI runs
+        if R_HOME is None:
+            raise RuntimeError(
+                "R_HOME not detected; cannot activate renv. Install R or set R_HOME."
+            )
+
+        return True
+
+    def _ensure_headless_env(self) -> None:
+        """Set defaults that prevent R GUI probing (e.g., this.path:::.gui_path)."""
+        if not self.headless:
+            return
+        defaults = {
+            "R_DEFAULT_DEVICE": "png",
+            "R_INTERACTIVE": "false",
+            "R_GUI_APP_VERSION": "0",
+            "RSTUDIO": "0",
+        }
+        for key, val in defaults.items():
+            os.environ.setdefault(key, val)
+
     # -----------------------------------------------------------------
     # Internal: lazy R loading
     # -----------------------------------------------------------------
@@ -435,6 +477,9 @@ class RFunctionCaller:
         Ensure R runtime is initialized and all configured R scripts
         are sourced exactly once, in isolated environments.
         """
+        # Ensure headless-safe env before rpy2 initializes R
+        self._ensure_headless_env()
+
         if self.robjects is None:
             rpy2_dict = _ensure_rpy2()
             self._RPY2 = rpy2_dict  # cache in instance
@@ -450,8 +495,8 @@ class RFunctionCaller:
             self.ListVector = rpy2_dict["ListVector"]
             self.NamedList = rpy2_dict["NamedList"]
 
-        # Activate renv once if requested
-        if self.path_to_renv and not self._renv_activated:
+        # Activate renv once if requested and allowed
+        if not self._renv_activated and self._should_activate_renv():
             try:
                 activate_renv(self.path_to_renv)
                 self._renv_activated = True
