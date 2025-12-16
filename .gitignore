@@ -27,3 +27,5 @@ htmlcov/
 
 # Node
 node_modules/
+
+.ty_checks/
