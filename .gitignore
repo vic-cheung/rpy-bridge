@@ -29,3 +29,4 @@ htmlcov/
 node_modules/
 
 .ty_checks/
+.ruff_checks/
