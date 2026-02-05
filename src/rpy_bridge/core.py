@@ -188,6 +188,16 @@ class RFunctionCaller:
         except Exception:
             pass
 
+        # Pass the current Python interpreter path to R so reticulate can use the same Python
+        # This is critical for nested Python→R→Python calls via reticulate
+        import sys
+
+        python_executable = sys.executable
+        venv_path = os.environ.get("VIRTUAL_ENV", "")
+        r(f'Sys.setenv(RPY_BRIDGE_PYTHON_EXECUTABLE = "{python_executable}")')
+        if venv_path:
+            r(f'Sys.setenv(VIRTUAL_ENV = "{venv_path}")')
+
         self.ensure_r_package("withr")
 
         if not hasattr(self, "_namespaces"):
@@ -357,9 +367,33 @@ class RFunctionCaller:
         with localconverter(robjects.default_converter + pandas2ri.converter):
             if is_na(obj):
                 return robjects.NULL
+            if isinstance(obj, pd.Timestamp):
+                # Convert single Timestamp to R Date (days since 1970-01-01)
+                days_since_epoch = (obj - pd.Timestamp("1970-01-01")).days
+                r = self.robjects.r
+                return r(f"as.Date({days_since_epoch}, origin='1970-01-01')")
             if isinstance(obj, pd.DataFrame):
-                return pandas2ri.py2rpy(obj)
+                # Convert datetime columns to numeric (days since epoch) before R conversion
+                df_copy = obj.copy()
+                for col in df_copy.columns:
+                    if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
+                        df_copy[col] = (df_copy[col] - pd.Timestamp("1970-01-01")).dt.days
+                r_df = pandas2ri.py2rpy(df_copy)
+                # Convert numeric date columns back to R Date class
+                r = self.robjects.r
+                for col in obj.columns:
+                    if pd.api.types.is_datetime64_any_dtype(obj[col]):
+                        r(f'class({r_df.rx2(col).r_repr()}) <- "Date"')
+                return r_df
             if isinstance(obj, pd.Series):
+                if pd.api.types.is_datetime64_any_dtype(obj):
+                    # Convert datetime Series to R Date vector
+                    days = (obj - pd.Timestamp("1970-01-01")).dt.days.tolist()
+                    r = self.robjects.r
+                    days_vec = FloatVector(
+                        [robjects.NA_Real if pd.isna(d) else float(d) for d in days]
+                    )
+                    return r("function(x) { class(x) <- 'Date'; x }")(days_vec)
                 return self._py2r(obj.tolist())
             if isinstance(obj, (int, float, bool, str)):
                 return obj

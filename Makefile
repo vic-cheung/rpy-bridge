@@ -23,8 +23,34 @@ setup: ensure-uv
 install-all:
 	uv pip install -e ".[dev]"
 
+# --------------------------------------
+# Linting with timestamped output
+# --------------------------------------
+RUFF_DIR:= $(CURDIR)/.ruff_checks
+RUFF_TIMESTAMP := $(shell date +%Y%m%d_%H%M%S)
+RUFF_OUTPUT := $(RUFF_DIR)/ruff_$(RUFF_TIMESTAMP).txt
+UNAME_S := $(shell uname -s)
+
 ruff:
-	uv run ruff check . --fix
+	@mkdir -p $(RUFF_DIR)
+	@echo "Running ruff..."
+	@RUFF_OUTPUT=$(RUFF_DIR)/ruff_$(shell date +%Y%m%d_%H%M%S).txt; \
+	uv run ruff check . --fix > $$RUFF_OUTPUT 2>&1; \
+	RU_RC=$$?; \
+	if [ $$RU_RC -ne 0 ]; then \
+		echo "[ruff reported issues or failed (exit code $$RU_RC)] See details: $$RUFF_OUTPUT"; \
+		case "$$(uname -s)" in \
+			Darwin) open $$RUFF_OUTPUT ;; \
+			Linux) xdg-open $$RUFF_OUTPUT ;; \
+			Windows_NT) start $$RUFF_OUTPUT ;; \
+			*) echo "Cannot auto-open file on this OS. File saved as: $$RUFF_OUTPUT" ;; \
+		esac; \
+		exit $$RU_RC; \
+	else \
+		echo "✅ Ruff check passed! No issues."; \
+		rm -f $$RUFF_OUTPUT; \
+	fi
+
 
 format: ruff
 
