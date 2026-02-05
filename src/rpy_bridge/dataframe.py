@@ -34,6 +34,28 @@ def normalize_single_df_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Column name patterns that suggest a date field
+_DATE_COL_PATTERNS = (
+    "date",
+    "dt",
+    "time",
+    "dob",
+    "dos",
+    "visit",
+    "start",
+    "end",
+    "created",
+    "updated",
+    "modified",
+)
+
+
+def _looks_like_date_column(col_name: str) -> bool:
+    """Check if column name suggests it contains date values."""
+    col_lower = str(col_name).lower()
+    return any(pattern in col_lower for pattern in _DATE_COL_PATTERNS)
+
+
 def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         series = df[col]
@@ -41,13 +63,18 @@ def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = series.mask(series == -2147483648, pd.NA)
         if pd.api.types.is_numeric_dtype(series):
             values = series.dropna()
-            if not values.empty and values.between(10000, 40000).all():
+            # Only convert to date if values are in R's date range AND column name suggests a date
+            if (
+                not values.empty
+                and values.between(10000, 40000).all()
+                and _looks_like_date_column(col)
+            ):
                 try:
                     df[col] = pd.to_datetime("1970-01-01") + pd.to_timedelta(series, unit="D")
                 except Exception:
                     pass
         if pd.api.types.is_datetime64tz_dtype(series):
-            df[col] = series.dt.tz_localize(None)
+            df[col] = series.dt.tz_convert(None)
     return df
 
 
