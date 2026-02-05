@@ -4,6 +4,8 @@ DataFrame cleaning and post-processing utilities for R ↔ Python workflows.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -34,26 +36,19 @@ def normalize_single_df_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# Column name patterns that suggest a date field
-_DATE_COL_PATTERNS = (
-    "date",
-    "dt",
-    "time",
-    "dob",
-    "dos",
-    "visit",
-    "start",
-    "end",
-    "created",
-    "updated",
-    "modified",
+# Token-based patterns to detect date/time columns; avoids substring matches like "endotoxin" or "runtime".
+_DATE_TOKEN_RE = re.compile(
+    r"(?<![a-z0-9])"
+    r"(?:date|dt|time|dob|visit|start|end|created|updated|modified|timestamp|datetime|ts|dos)"
+    r"(?![a-z0-9])",
+    re.IGNORECASE,
 )
 
 
 def _looks_like_date_column(col_name: str) -> bool:
     """Check if column name suggests it contains date values."""
     col_lower = str(col_name).lower()
-    return any(pattern in col_lower for pattern in _DATE_COL_PATTERNS)
+    return bool(_DATE_TOKEN_RE.search(col_lower))
 
 
 def fix_r_dataframe_types(df: pd.DataFrame) -> pd.DataFrame:
