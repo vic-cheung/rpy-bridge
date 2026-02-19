@@ -179,8 +179,8 @@ CI and headless tips
 
 Logging
 -------
-- Logs emit through loguru (fallback to stdlib) with a dedicated ``[RFunctionCaller]`` sink
-- Adjust log level globally via loguru/stdlib configuration in your app
+- Logs emit through the Python `logging` stdlib with a dedicated ``[RFunctionCaller]`` handler
+- Adjust log level globally via stdlib `logging` configuration in your app
 
 ---
 

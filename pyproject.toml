@@ -1,6 +1,6 @@
 [project]
 name = "rpy-bridge"
-version = "0.5.2"
+version = "0.5.3"
 description = "Python-to-R interoperability engine with environment management, type-safe conversions, data normalization, and safe R function execution."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -24,7 +24,6 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
-    "loguru>=0.7",
 ]
 
 classifiers = [

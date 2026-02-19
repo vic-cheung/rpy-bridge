@@ -1,8 +1,8 @@
 """
 Logging utilities for rpy-bridge.
 
-Sets up a loguru-backed logger (fallback to the stdlib logger) and a dedicated
-[RFunctionCaller] sink used throughout the package.
+Sets up a stdlib `logging` logger and a dedicated
+`[RFunctionCaller]` handler used throughout the package.
 """
 
 from __future__ import annotations
@@ -12,38 +12,50 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from loguru import Logger as LoguruLogger
-
-    LoggerType = LoguruLogger | logging.Logger
-else:  # pragma: no cover - runtime does not need the alias
+    LoggerType = logging.Logger
+else:
     LoggerType = None
 
-try:
-    from loguru import logger as loguru_logger  # type: ignore
 
-    logger = loguru_logger
-except ImportError:  # pragma: no cover - fallback when loguru is absent
-    logging.basicConfig()
-    logger = logging.getLogger("rpy-bridge")
+# Configure package logger
+logging.basicConfig()
+logger = logging.getLogger("rpy-bridge")
+logger.setLevel(logging.INFO)
 
-# Remove default handler to override global default
-logger.remove()
 
-# Add a sink for RFunctionCaller logs
-_rfc_logger = logger.bind(tag="[RFunctionCaller]")
-_rfc_logger.add(
-    sys.stderr,
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-    level="INFO",
+# Ensure handler writes to stderr and uses a compact formatter. A filter
+# injects a `tag` attribute (used for the RFunctionCaller handler) so the
+# formatter remains robust for records without a tag.
+class _TagFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:  # pragma: no cover - simple passthrough
+        if not hasattr(record, "tag"):
+            record.tag = ""
+        return True
+
+
+handler = logging.StreamHandler(sys.stderr)
+formatter = logging.Formatter(
+    "%(asctime)s | %(levelname)s | %(tag)s %(message)s", "%Y-%m-%d %H:%M:%S"
 )
+handler.setFormatter(formatter)
+handler.addFilter(_TagFilter())
+
+# Avoid adding duplicate handlers when this module is imported multiple times
+if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+    logger.addHandler(handler)
+
+
+# Dedicated logger adapter for R function call tracing
+_rfc_logger = logging.LoggerAdapter(logger, {"tag": "[RFunctionCaller]"})
 
 
 def log_r_call(func_name: str, source_info: str) -> None:
-    """Log an R function call with minimal noise."""
-    _rfc_logger.opt(depth=1, record=False).info(
-        "[rpy-bridge.RFunctionCaller] Called R function '{}' from {}",
-        func_name,
-        source_info,
+    """
+    Log an R function call with minimal noise.
+    """
+    # Keep call site depth minimal: use INFO level and a concise message.
+    _rfc_logger.info(
+        "[rpy-bridge.RFunctionCaller] Called R function '%s' from %s", func_name, source_info
     )
 
 

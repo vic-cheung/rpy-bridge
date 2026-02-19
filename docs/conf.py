@@ -40,7 +40,6 @@ autodoc_mock_imports = [
     "rpy2.robjects",
     "rpy2.rinterface_lib",
     "rpy2.rinterface",
-    "loguru",
 ]
 
 autodoc_typehints = "description"

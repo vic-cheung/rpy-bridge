@@ -110,7 +110,7 @@ def activate_renv(path_to_renv: Path) -> None:
     renviron_file = project_dir / ".Renviron"
     if renviron_file.is_file():
         os.environ["R_ENVIRON_USER"] = str(renviron_file)
-        logger.info(f"[rpy-bridge] R_ENVIRON_USER set to: {renviron_file}")
+        logger.info("[rpy-bridge] R_ENVIRON_USER set to: %s", renviron_file)
 
     rprofile_file = project_dir / ".Rprofile"
     if rprofile_file.is_file():
@@ -120,7 +120,7 @@ def activate_renv(path_to_renv: Path) -> None:
                 f"on.exit(setwd(old_wd), add = TRUE); "
                 f'source("{rprofile_file.as_posix()}")'
             )
-            logger.info(f"[rpy-bridge] .Rprofile sourced: {rprofile_file}")
+            logger.info("[rpy-bridge] .Rprofile sourced: %s", rprofile_file)
         except Exception as exc:  # pragma: no cover - defensive fallback
             logger.warning(
                 "[rpy-bridge] Failed to source .Rprofile; falling back to renv::activate(): %s",
@@ -137,7 +137,7 @@ def activate_renv(path_to_renv: Path) -> None:
         robjects.r("library(renv)")
 
     robjects.r(f'renv::load("{project_dir.as_posix()}")')
-    logger.info(f"[rpy-bridge] renv environment loaded for project: {project_dir}")
+    logger.info("[rpy-bridge] renv environment loaded for project: %s", project_dir)
 
 
 __all__ = [

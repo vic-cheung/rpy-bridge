@@ -214,7 +214,7 @@ class RFunctionCaller:
             elif script_entry.is_dir():
                 r_files = sorted(script_entry.glob("*.R"))
                 if not r_files:
-                    logger.warning(f"No .R files found in directory: {script_entry}")
+                    logger.warning("No .R files found in directory: %s", script_entry)
                     self._scripts_loaded[idx] = True
                     continue
             else:
@@ -222,10 +222,8 @@ class RFunctionCaller:
 
             for script_path in r_files:
                 ns_name = script_path.stem
-                logger.opt(depth=2).info(
-                    "[rpy-bridge.RFunctionCaller] Loading R script '{}' as namespace '{}'",
-                    script_path.name,
-                    ns_name,
+                logger.info(
+                    f"[rpy-bridge.RFunctionCaller] Loading R script '{script_path.name}' as namespace '{ns_name}'"
                 )
 
                 r("env <- new.env(parent=globalenv())")
@@ -301,7 +299,7 @@ class RFunctionCaller:
             ]
             return funcs
         except Exception:
-            logger.warning(f"Failed to list functions for package '{pkg}'")
+            logger.warning("Failed to list functions for package '%s'", pkg)
             return []
 
     def list_all_functions(self, include_packages: bool = False) -> dict[str, list[str]]:
@@ -453,8 +451,8 @@ class RFunctionCaller:
         try:
             r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
         except Exception:
-            logger.info(f"[rpy-bridge.RFunctionCaller] Package '{pkg}' not found.")
-            logger.warning(f"[rpy-bridge.RFunctionCaller] Installing missing R package: {pkg}")
+            logger.info("[rpy-bridge.RFunctionCaller] Package '%s' not found.", pkg)
+            logger.warning("[rpy-bridge.RFunctionCaller] Installing missing R package: %s", pkg)
             r(f'install.packages("{pkg}", repos="https://cloud.r-project.org")')
             r(f'suppressMessages(library("{pkg}", character.only=TRUE))')
 
